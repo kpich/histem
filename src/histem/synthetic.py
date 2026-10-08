@@ -1,9 +1,4 @@
-"""A hand-written ground-truth world, to check whether induction recovers known rules.
-
-A toy myeloid/erythroid fork: a GATA1/PU1 toggle, chromatin gates on GATA1 and CEBPA,
-a MYC <-> mitochondria loop, and a PU1-secreted signal (IL) that opens CEBPA chromatin.
-This is not meant to be biologically accurate; it exercises every part of the framework.
-"""
+"""Toy ground-truth world: GATA1/PU1 fork, chromatin gates, MYC/mito loop, IL signal."""
 
 import anndata as ad
 import numpy as np
@@ -55,7 +50,7 @@ def make_observer(
             genes.append(f"{d}_t{k}")
             w = np.zeros(len(DRIVERS))
             w[j] = rng.uniform(1.5, 3.0)
-            if rng.random() < 0.3:  # some targets are co-regulated
+            if rng.random() < 0.3:
                 w[rng.integers(len(DRIVERS))] += rng.uniform(-1.0, 1.0)
             rows.append(w)
     for k in range(housekeeping):

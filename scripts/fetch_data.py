@@ -1,12 +1,4 @@
-"""Download public datasets into ../data (a sibling of the repo).
-
-    uv run scripts/fetch_data.py                 # default: norman2019
-    uv run scripts/fetch_data.py replogle_k562_essential replogle_rpe1
-    uv run scripts/fetch_data.py --list
-
-Perturb-seq files come from the scPerturb harmonised h5ad collection on Zenodo; md5s
-are checked against the Zenodo API.
-"""
+"""Download public datasets (scPerturb h5ads on Zenodo) into ../data."""
 
 import argparse
 import hashlib
@@ -17,7 +9,7 @@ from pathlib import Path
 
 from histem.data import DATA_DIR
 
-SCPERTURB_RECORD = "13350497"  # scPerturb RNA+protein h5ad, v1.4
+SCPERTURB_RECORD = "13350497"  # v1.4
 
 DATASETS = {
     # name: (zenodo record, filename, note)

@@ -1,9 +1,3 @@
-"""Integration: the components wire together end to end on a tiny world.
-
-Checks plumbing only (shapes, keys, types, finiteness). Whether search recovers
-anything is an empirical question for scripts/, not a test.
-"""
-
 import math
 
 import numpy as np

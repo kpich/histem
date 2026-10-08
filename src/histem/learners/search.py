@@ -1,10 +1,3 @@
-"""Representation-agnostic edit search, plus random AST mutation for logic programs.
-
-`Proposer` is the seam for different induction strategies. Random mutation is the dumb
-baseline; an LLM proposer (read the program text + per-condition scores, return an
-edited program) plugs in at the same place.
-"""
-
 import ast
 import copy
 import random
@@ -22,7 +15,7 @@ from histem.world import WorldModel
 
 class Proposal(FrozenSpec):
     world: WorldModel
-    note: str = ""  # human-readable description of the edit, for logs
+    note: str = ""
 
 
 class Proposer(Protocol):
@@ -32,7 +25,7 @@ class Proposer(Protocol):
 
 
 class SearchLog(Spec):
-    # (iteration, objective, note) for every accepted proposal
+    # (iteration, objective, note)
     accepted: list[tuple[int, float, str]] = Field(default_factory=list)
 
 
@@ -52,7 +45,7 @@ def hill_climb(
         try:
             proposal = proposer.propose(world, best, rng)
             scores = suite.evaluate(proposal.world)
-        except (KeyError, ValueError):  # invalid proposals (incl. RuleError)
+        except (KeyError, ValueError):
             continue
         if scores.objective < best.objective and not Suite.regressions(best, scores):
             world, best = proposal.world, scores
@@ -60,9 +53,6 @@ def hill_climb(
             if verbose:
                 print(f"[{it}] objective={best.objective:.4f}  {proposal.note}")
     return world, best, log
-
-
-# --- random mutation of logic programs ---------------------------------------
 
 
 class _Mutator:
@@ -121,8 +111,7 @@ class _Mutator:
         return _replace_node(tree, node, ast.UnaryOp(ast.Not(), copy.deepcopy(node)))
 
     def _grow(self, tree: ast.Expression) -> ast.Expression:
-        """Combine the whole rule with a new literal, e.g. `e` -> `e and X >= 1`,
-        or turn a boolean rule into a graded one: `2 if e else 0`."""
+        """`e` -> `e and X >= 1`, `e or X >= 1`, or `2 if e else 0`."""
         body = tree.body
         choice = self.rng.random()
         if choice < 0.2 and not isinstance(body, ast.IfExp):
@@ -149,8 +138,6 @@ def _replace_node(tree: ast.Expression, old: ast.expr, new: ast.expr) -> ast.Exp
 
 
 class RandomLogicEdit(Spec):
-    """Mutate one rule of a LogicDynamics at random."""
-
     seed: int = 0
     _rng: random.Random = PrivateAttr()
 

@@ -1,9 +1,3 @@
-"""Observation models: hidden cell state -> what an assay measures.
-
-Each modality (scRNA counts, ATAC, spatial, Hi-C, ...) is an Observer. Adding a data
-type means adding an Observer; the Dynamics don't change.
-"""
-
 from typing import Protocol, Self, runtime_checkable
 
 import anndata as ad
@@ -36,17 +30,14 @@ def state_features(pop: Population, variables: tuple[str, ...]) -> np.ndarray:
 
 
 class NBCountObserver(FrozenSpec):
-    """scRNA-like counts.
-
-    log mean_g = log(size) + bias_g + weights_g . features(state)
-    """
+    """log mean_g = log(size) + bias_g + weights_g . features(state)"""
 
     genes: tuple[str, ...] = Field(min_length=1)
-    drivers: tuple[str, ...] = Field(min_length=1)  # state variables counts depend on
+    drivers: tuple[str, ...] = Field(min_length=1)
     weights: np.ndarray  # (n_genes, n_drivers)
     bias: np.ndarray  # (n_genes,)
-    dispersion: float = Field(5.0, gt=0)  # NB theta; larger = closer to Poisson
-    size_sd: float = Field(0.3, ge=0)  # lognormal per-cell library-size noise
+    dispersion: float = Field(5.0, gt=0)  # NB theta
+    size_sd: float = Field(0.3, ge=0)  # sd of log library size
     modality: str = "rna"
 
     @model_validator(mode="after")

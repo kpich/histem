@@ -28,8 +28,6 @@ build-backend = "hatchling.build"
 packages = ["src/histem"]
 exclude = ["*_test.py"]
 
-# --- ruff ------------------------------------------------------------------------
-
 [tool.ruff]
 line-length = 88
 target-version = "py311"
@@ -60,22 +58,20 @@ select = [
     "FURB",     # refurb
 ]
 ignore = [
-    "PLR0913",  # too many arguments: simulation entry points take many knobs
-    "PLR2004",  # magic values in comparisons: too noisy for numeric code
-    "PLR0911",  # too many returns: the AST compiler is one big match
-    "ISC001",   # conflicts with the formatter
+    "PLR0913",  # too many arguments
+    "PLR2004",  # magic values
+    "PLR0911",  # too many returns
+    "ISC001",   # conflicts with ruff format
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["T20"]
-"src/histem/learners/search.py" = ["T20"]  # verbose progress output
+"src/histem/learners/search.py" = ["T20"]
 "*_test.py" = ["PLR2004"]
 "tests/*" = ["PLR2004"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["histem"]
-
-# --- mypy ------------------------------------------------------------------------
 
 [tool.mypy]
 python_version = "3.11"
@@ -93,8 +89,6 @@ strict_equality = true
 [[tool.mypy.overrides]]
 module = ["anndata.*"]
 ignore_missing_imports = true
-
-# --- pytest ----------------------------------------------------------------------
 
 [tool.pytest.ini_options]
 python_files = ["*_test.py"]

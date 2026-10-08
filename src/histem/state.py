@@ -1,10 +1,3 @@
-"""Per-cell state: a typed schema of slots, and a batched population of cells.
-
-The rules (Dynamics) are shared by every cell; everything that differs between cells
-lives here. A slot is a named block of variables such as expression nodes, chromatin
-accessibility, mitochondrial state, or free latent variables.
-"""
-
 from dataclasses import dataclass, field
 from typing import Any, Literal, Self
 
@@ -20,8 +13,8 @@ class Slot(FrozenSpec):
     name: str
     variables: tuple[str, ...] = Field(min_length=1)
     kind: SlotKind = "discrete"
-    levels: int = 2  # discrete only: values are 0..levels-1
-    observed: bool = False  # can some Observer read this slot directly?
+    levels: int = 2  # discrete values are 0..levels-1
+    observed: bool = False
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -91,11 +84,11 @@ class StateSchema(FrozenSpec):
 
 @dataclass
 class Population:
-    """A batch of cells. `values[slot]` has shape (n_cells, slot.dim)."""
+    """`values[slot]` has shape (n_cells, slot.dim)."""
 
     schema: StateSchema
     values: dict[str, np.ndarray]
-    positions: np.ndarray | None = None  # (n, d) spatial coordinates, if any
+    positions: np.ndarray | None = None  # (n, d)
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property

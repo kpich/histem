@@ -1,10 +1,4 @@
-"""Can search recover a known program from its simulated Perturb-seq data?
-
-Starts from the null program (every variable holds its value) and hill-climbs with
-random rule edits. Baseline for any smarter Proposer (LLM edits, distillation, ...).
-
-    uv run scripts/synthetic_recovery.py --iters 500
-"""
+"""Hill-climb from the null program on synthetic data; compare to the true program."""
 
 import argparse
 

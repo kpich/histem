@@ -1,10 +1,3 @@
-"""Datasets as a regression test suite, and the objective used to score world models.
-
-Lifelong learning: every dataset ever added stays in the suite. A candidate update
-to the world model is accepted only if it improves the objective without regressing any
-dataset beyond tolerance.
-"""
-
 import numpy as np
 from pydantic import Field
 
@@ -28,10 +21,9 @@ class Scores(FrozenSpec):
 
 class Suite(Spec):
     datasets: list[Dataset] = Field(default_factory=list)
-    # lambda: the interpretability/fit tradeoff knob
     complexity_weight: float = Field(1e-3, ge=0)
     cells_per_condition: int = Field(300, gt=0)
-    # common random numbers: one seed for every candidate reduces scoring noise
+    # same seed for every candidate, so score differences aren't sampling noise
     seed: int = 0
 
     def add(self, dataset: Dataset) -> None:

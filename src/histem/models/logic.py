@@ -1,20 +1,13 @@
-"""Multi-valued asynchronous logic programs: the first Dynamics implementation.
-
-A program is plain text, one rule per line, so that people, LLMs, and mutation operators
-can all read and edit it:
+"""Multi-valued asynchronous logic programs, written as plain text:
 
     GATA1 <- 2 if (GATA1 >= 1 or acc_GATA1 >= 1) and not PU1 >= 2 else 0
     acc_GATA1 <- in_EPO >= 0.5
     emit EPO <- 0.0
     rate acc_GATA1 = 0.05
 
-`X <- expr` sets the *target* level of X. Each step, every ruled variable updates
-with probability `rate`, moving one level toward its target (continuous variables
-relax toward it). Variables without a rule hold their value. `in_<SIG>` is the
-received level of signal SIG, and `emit SIG <- expr` is what the cell secretes.
-
-Expressions are a vectorised Python subset: and/or/not, comparisons, + - *,
-`x if c else y`, min/max, and numeric constants.
+`X <- expr` sets X's target. Each step, each ruled variable fires with probability
+`rate` and moves one level toward its target. Unruled variables hold. `in_S` is the
+received level of signal S. Expressions are a vectorised Python subset.
 """
 
 import ast
@@ -44,7 +37,7 @@ _BIN = {ast.Add: np.add, ast.Sub: np.subtract, ast.Mult: np.multiply}
 
 
 class RuleError(ValueError):
-    """A rule that doesn't parse, uses unsupported syntax, or names unknowns."""
+    pass
 
 
 def compile_expr(source: str | ast.expr, names: set[str]) -> Compiled:
@@ -115,8 +108,8 @@ def expr_size(source: str) -> int:
 
 class LogicDynamics(FrozenSpec):
     state_schema: StateSchema
-    rules: dict[str, str]  # target variable -> expression
-    signal_rules: dict[str, str] = Field(default_factory=dict)  # signal -> amount
+    rules: dict[str, str]
+    signal_rules: dict[str, str] = Field(default_factory=dict)
     rates: dict[str, float] = Field(default_factory=dict)
     default_rate: float = Field(0.5, gt=0, le=1)
 
@@ -147,8 +140,6 @@ class LogicDynamics(FrozenSpec):
     def vocabulary(self) -> set[str]:
         return set(self.state_schema.variables) | {f"in_{s}" for s in self.signal_names}
 
-    # --- Dynamics protocol ---------------------------------------------------
-
     def step(
         self, pop: Population, inputs: Inputs, rng: np.random.Generator
     ) -> Population:
@@ -177,7 +168,6 @@ class LogicDynamics(FrozenSpec):
         if not self.signal_names:
             return np.zeros((pop.n, 0), np.float32)
         env: Env = pop.variable_view()
-        # emission sees no received signals; zeros let rules still reference in_*
         for s in self.signal_names:
             env[f"in_{s}"] = np.zeros(pop.n, np.float32)
         return np.stack(
@@ -193,18 +183,15 @@ class LogicDynamics(FrozenSpec):
 
     def description_length(self) -> float:
         exprs = [*self.rules.values(), *self.signal_rules.values()]
-        size = sum(expr_size(e) + 1 for e in exprs)  # +1 for naming the rule's target
-        vocab = len(self.vocabulary) + 16  # variables + operators/constants
+        size = sum(expr_size(e) + 1 for e in exprs)
+        vocab = len(self.vocabulary) + 16  # + operators and constants
         return float(size * math.log2(vocab))
-
-    # --- text form -----------------------------------------------------------
 
     def with_rules(
         self,
         rules: dict[str, str] | None = None,
         signal_rules: dict[str, str] | None = None,
     ) -> "LogicDynamics":
-        """A validated copy with some rules replaced."""
         return LogicDynamics(
             state_schema=self.state_schema,
             rules={**self.rules, **(rules or {})},

@@ -1,9 +1,3 @@
-"""Distances between observed and simulated cell populations.
-
-Snapshot data has no cell-to-cell pairing between experiment and simulation, so every
-fit term compares distributions.
-"""
-
 import anndata as ad
 import numpy as np
 from scipy.spatial.distance import cdist
@@ -21,7 +15,7 @@ def log_normalize(
 
 
 def energy_distance(x: np.ndarray, y: np.ndarray) -> float:
-    """Energy distance (Székely). Zero iff distributions match; no bandwidth."""
+    """Energy distance (Székely); zero iff the distributions match."""
     return float(2 * cdist(x, y).mean() - cdist(x, x).mean() - cdist(y, y).mean())
 
 

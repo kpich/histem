@@ -1,11 +1,3 @@
-"""Run a population of cells forward under shared Dynamics.
-
-Signaling is routed here, not inside Dynamics, so the same rules can run in a dish
-(well-mixed, no neighbor graph) or in a tissue patch (spatial neighbor graph).
-Received signal = autocrine * own + paracrine * neighbor mean
-                + endocrine * population mean.
-"""
-
 from typing import Self
 
 import numpy as np
@@ -22,7 +14,6 @@ class Signaling(FrozenSpec):
     autocrine: float = Field(1.0, ge=0)
     paracrine: float = Field(1.0, ge=0)
     endocrine: float = Field(0.0, ge=0)
-    # (n, n) adjacency; None = no paracrine routing
     neighbors: sp.csr_matrix | None = None
 
     @model_validator(mode="after")
@@ -35,6 +26,7 @@ class Signaling(FrozenSpec):
         return self
 
     def route(self, emitted: np.ndarray) -> np.ndarray:
+        """autocrine * own + paracrine * neighbor mean + endocrine * global mean."""
         received = self.autocrine * emitted
         if self.neighbors is not None and self.paracrine:
             if self.neighbors.shape[0] != emitted.shape[0]:
@@ -64,7 +56,7 @@ def simulate(
     signaling: Signaling | None = None,
     record_every: int | None = None,
 ) -> tuple[Population, list[Population]]:
-    """Returns (final population, snapshots taken every `record_every` steps)."""
+    """Returns (final population, snapshots every `record_every` steps)."""
     signaling = signaling or Signaling()
     dyn = dynamics.intervene(intervention)
     pop = pop.copy()

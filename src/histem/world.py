@@ -1,6 +1,3 @@
-"""A WorldModel is everything needed to produce data: shared rules, a prior over
-initial cell states, how signals are routed, and an Observer per modality."""
-
 from collections.abc import Callable
 
 import anndata as ad
@@ -20,7 +17,6 @@ class WorldModel(FrozenSpec):
     dynamics: Dynamics
     observers: dict[str, Observer]
     init: InitPrior
-    # steps run before observing; snapshots are treated as near-stationary
     burn_in: int = Field(50, ge=0)
     signaling: Signaling = Field(default_factory=Signaling)
 

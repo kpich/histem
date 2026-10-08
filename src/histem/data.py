@@ -1,5 +1,3 @@
-"""Datasets: observed cells plus the experimental conditions they came from."""
-
 from pathlib import Path
 from typing import Self
 
@@ -9,14 +7,13 @@ from pydantic import model_validator
 from histem.dynamics import Intervention
 from histem.spec import FrozenSpec
 
-# Sibling of the repo (src/histem/data.py -> ../../../data). Fetch scripts write here.
+# ../data next to the repo
 DATA_DIR = Path(__file__).resolve().parents[3] / "data"
 
 
 class Dataset(FrozenSpec):
     name: str
     adata: ad.AnnData
-    # condition label -> how to reproduce it in simulation
     interventions: dict[str, Intervention]
     condition_key: str = "condition"
     modality: str = "rna"
@@ -36,7 +33,6 @@ class Dataset(FrozenSpec):
         return self.adata[self.adata.obs[self.condition_key].astype(str) == condition]
 
     def split(self, held_out: list[str]) -> tuple["Dataset", "Dataset"]:
-        """Split by condition, e.g. hold out perturbations to test generalisation."""
         unknown = set(held_out) - set(self.interventions)
         if unknown:
             raise KeyError(f"unknown conditions: {sorted(unknown)}")
