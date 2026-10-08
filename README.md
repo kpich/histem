@@ -9,6 +9,9 @@ Experimental. Highly unstable.
 
 ## Pieces
 
+Code lives in `src/histem/`. Unit tests sit next to the module they test
+(`foo.py` → `foo_test.py`); `tests/` holds only integration tests.
+
 | module | role |
 |---|---|
 | `state.py` | `StateSchema` of typed `Slot`s; `Population` = batched per-cell state |
@@ -27,8 +30,10 @@ distilled neural emulator, ...) plugs in by implementing `Dynamics`.
 ## Usage
 
 ```bash
-uv venv && uv pip install -e ".[dev]"
-uv run pytest
+make install                  # uv sync (creates .venv, installs dev group)
+make install-precommit-hooks  # ruff, ruff-format, mypy, file hygiene on commit
+make check                    # ruff + format check, mypy, unit tests, integration tests
+make format                   # ruff --fix + ruff format
 uv run scripts/synthetic_recovery.py --iters 500
 uv run scripts/fetch_data.py --list        # data goes to ../data
 ```

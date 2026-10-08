@@ -23,14 +23,26 @@ SCPERTURB_RECORD = "13350497"  # scPerturb RNA+protein h5ad, v1.4
 
 DATASETS = {
     # name: (zenodo record, filename, note)
-    "norman2019": (SCPERTURB_RECORD, "NormanWeissman2019_filtered.h5ad",
-                   "K562 CRISPRa, single + combinatorial; ~0.7 GB"),
-    "replogle_k562_essential": (SCPERTURB_RECORD, "ReplogleWeissman2022_K562_essential.h5ad",
-                                "K562 CRISPRi essential genes; ~1.5 GB"),
-    "replogle_rpe1": (SCPERTURB_RECORD, "ReplogleWeissman2022_rpe1.h5ad",
-                      "RPE1 CRISPRi essential genes; ~1.2 GB"),
-    "replogle_k562_gwps": (SCPERTURB_RECORD, "ReplogleWeissman2022_K562_gwps.h5ad",
-                           "K562 genome-wide CRISPRi; ~8.8 GB"),
+    "norman2019": (
+        SCPERTURB_RECORD,
+        "NormanWeissman2019_filtered.h5ad",
+        "K562 CRISPRa, single + combinatorial; ~0.7 GB",
+    ),
+    "replogle_k562_essential": (
+        SCPERTURB_RECORD,
+        "ReplogleWeissman2022_K562_essential.h5ad",
+        "K562 CRISPRi essential genes; ~1.5 GB",
+    ),
+    "replogle_rpe1": (
+        SCPERTURB_RECORD,
+        "ReplogleWeissman2022_rpe1.h5ad",
+        "RPE1 CRISPRi essential genes; ~1.2 GB",
+    ),
+    "replogle_k562_gwps": (
+        SCPERTURB_RECORD,
+        "ReplogleWeissman2022_K562_gwps.h5ad",
+        "K562 genome-wide CRISPRi; ~8.8 GB",
+    ),
 }
 
 
@@ -39,7 +51,11 @@ def zenodo_file(record: str, filename: str) -> tuple[str, str | None, int]:
         files = json.load(r)["files"]
     for f in files:
         if f["key"] == filename:
-            md5 = f["checksum"].split(":", 1)[1] if f.get("checksum", "").startswith("md5:") else None
+            md5 = (
+                f["checksum"].split(":", 1)[1]
+                if f.get("checksum", "").startswith("md5:")
+                else None
+            )
             return f["links"]["self"], md5, f["size"]
     raise FileNotFoundError(f"{filename} not in zenodo record {record}")
 
@@ -59,7 +75,9 @@ def download(url: str, dest: Path, size: int) -> None:
         while chunk := r.read(1 << 22):
             f.write(chunk)
             done += len(chunk)
-            print(f"\r  {done / 1e9:.2f} / {size / 1e9:.2f} GB", end="", file=sys.stderr)
+            print(
+                f"\r  {done / 1e9:.2f} / {size / 1e9:.2f} GB", end="", file=sys.stderr
+            )
     print(file=sys.stderr)
     tmp.rename(dest)
 
@@ -79,7 +97,7 @@ def fetch(name: str, force: bool = False) -> Path:
     return dest
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("names", nargs="*", default=["norman2019"])
     ap.add_argument("--list", action="store_true")

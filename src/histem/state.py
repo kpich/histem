@@ -28,7 +28,7 @@ class Slot:
         return len(self.variables)
 
     @property
-    def dtype(self):
+    def dtype(self) -> type[np.generic]:
         return np.int8 if self.kind == "discrete" else np.float32
 
 
@@ -36,11 +36,13 @@ class Slot:
 class StateSchema:
     slots: tuple[Slot, ...]
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         names = [v for s in self.slots for v in s.variables]
         dupes = {n for n in names if names.count(n) > 1}
         if dupes:
-            raise ValueError(f"variable names must be unique across slots: {sorted(dupes)}")
+            raise ValueError(
+                f"variable names must be unique across slots: {sorted(dupes)}"
+            )
 
     def slot(self, name: str) -> Slot:
         for s in self.slots:
@@ -60,7 +62,9 @@ class StateSchema:
         return [v for s in self.slots for v in s.variables]
 
     def empty(self, n: int) -> Population:
-        return Population(self, {s.name: np.zeros((n, s.dim), s.dtype) for s in self.slots})
+        return Population(
+            self, {s.name: np.zeros((n, s.dim), s.dtype) for s in self.slots}
+        )
 
     def uniform(self, n: int, rng: np.random.Generator) -> Population:
         """Discrete slots uniform over levels, continuous slots standard normal."""
@@ -84,7 +88,7 @@ class Population:
 
     @property
     def n(self) -> int:
-        return next(iter(self.values.values())).shape[0]
+        return int(next(iter(self.values.values())).shape[0])
 
     def get(self, variable: str) -> np.ndarray:
         slot, i = self.schema.locate(variable)
@@ -92,12 +96,26 @@ class Population:
 
     def variable_view(self) -> dict[str, np.ndarray]:
         """Flat {variable: (n,) array} view, without copying."""
-        return {v: self.values[s.name][:, i] for s in self.schema.slots for i, v in enumerate(s.variables)}
+        return {
+            v: self.values[s.name][:, i]
+            for s in self.schema.slots
+            for i, v in enumerate(s.variables)
+        }
 
     def copy(self) -> Population:
         pos = None if self.positions is None else self.positions.copy()
-        return Population(self.schema, {k: v.copy() for k, v in self.values.items()}, pos, dict(self.meta))
+        return Population(
+            self.schema,
+            {k: v.copy() for k, v in self.values.items()},
+            pos,
+            dict(self.meta),
+        )
 
-    def subset(self, idx) -> Population:
+    def subset(self, idx: np.ndarray | slice) -> Population:
         pos = None if self.positions is None else self.positions[idx]
-        return Population(self.schema, {k: v[idx] for k, v in self.values.items()}, pos, dict(self.meta))
+        return Population(
+            self.schema,
+            {k: v[idx] for k, v in self.values.items()},
+            pos,
+            dict(self.meta),
+        )

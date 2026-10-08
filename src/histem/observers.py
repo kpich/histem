@@ -25,7 +25,7 @@ class Observer(Protocol):
 
 
 def state_features(pop: Population, variables: tuple[str, ...]) -> np.ndarray:
-    """(n, k) features: discrete variables scaled to [0, 1], continuous ones passed through."""
+    """(n, k) features: discrete scaled to [0, 1], continuous passed through."""
     cols = []
     for v in variables:
         slot = pop.schema.slot(pop.schema.locate(v)[0])
@@ -36,7 +36,10 @@ def state_features(pop: Population, variables: tuple[str, ...]) -> np.ndarray:
 
 @dataclass
 class NBCountObserver:
-    """scRNA-like counts. log mean_g = log(size) + bias_g + weights_g . features(state)."""
+    """scRNA-like counts.
+
+    log mean_g = log(size) + bias_g + weights_g . features(state)
+    """
 
     genes: tuple[str, ...]
     drivers: tuple[str, ...]  # state variables the counts depend on
@@ -48,7 +51,9 @@ class NBCountObserver:
 
     def mean(self, pop: Population, rng: np.random.Generator) -> np.ndarray:
         size = np.exp(rng.normal(0.0, self.size_sd, (pop.n, 1)))
-        return size * np.exp(self.bias + state_features(pop, self.drivers) @ self.weights.T)
+        log_mu = self.bias + state_features(pop, self.drivers) @ self.weights.T
+        mu: np.ndarray = size * np.exp(log_mu)
+        return mu
 
     def observe(self, pop: Population, rng: np.random.Generator) -> ad.AnnData:
         mu = self.mean(pop, rng)

@@ -34,7 +34,8 @@ class Suite:
     datasets: list[Dataset] = field(default_factory=list)
     complexity_weight: float = 1e-3  # lambda: the interpretability/fit tradeoff knob
     cells_per_condition: int = 300
-    seed: int = 0  # common random numbers: the same seed for every candidate reduces scoring noise
+    # common random numbers: one seed for every candidate reduces scoring noise
+    seed: int = 0
 
     def add(self, dataset: Dataset) -> None:
         self.datasets.append(dataset)
@@ -53,7 +54,9 @@ class Suite:
         objective = float(np.mean(list(fit.values()))) + self.complexity_weight * dl
         return Scores(fit, dl, objective)
 
-    def regressions(self, before: Scores, after: Scores, tolerance: float = 0.05) -> list[str]:
+    def regressions(
+        self, before: Scores, after: Scores, tolerance: float = 0.05
+    ) -> list[str]:
         """Datasets whose mean fit got worse by more than `tolerance` (relative)."""
         b, a = before.by_dataset(), after.by_dataset()
         return [k for k in b if k in a and a[k] > b[k] * (1 + tolerance)]

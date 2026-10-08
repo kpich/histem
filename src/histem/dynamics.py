@@ -51,12 +51,17 @@ class Dynamics(Protocol):
     schema: StateSchema
     signal_names: tuple[str, ...]
 
-    def step(self, pop: Population, inputs: Inputs, rng: np.random.Generator) -> Population:
+    def step(
+        self, pop: Population, inputs: Inputs, rng: np.random.Generator
+    ) -> Population:
         """Sample the next state for every cell. Must not mutate `pop`."""
         ...
 
     def emit_signals(self, pop: Population) -> np.ndarray:
-        """(n, n_signals) secreted ligand amounts. Routing between cells is the Simulator's job."""
+        """(n, n_signals) secreted ligand amounts.
+
+        Routing between cells is the Simulator's job.
+        """
         ...
 
     def intervene(self, intervention: Intervention) -> Dynamics:

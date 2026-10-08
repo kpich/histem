@@ -10,6 +10,7 @@ from __future__ import annotations
 import ast
 import copy
 import random
+from collections.abc import Callable
 from dataclasses import dataclass, field, replace
 from typing import Protocol
 
@@ -20,17 +21,31 @@ from histem.suite import Scores, Suite
 from histem.world import WorldModel
 
 
+@dataclass
+class Proposal:
+    world: WorldModel
+    note: str = ""  # human-readable description of the edit, for logs
+
+
 class Proposer(Protocol):
-    def propose(self, world: WorldModel, scores: Scores, rng: np.random.Generator) -> WorldModel: ...
+    def propose(
+        self, world: WorldModel, scores: Scores, rng: np.random.Generator
+    ) -> Proposal: ...
 
 
 @dataclass
 class SearchLog:
-    accepted: list[tuple[int, float, str]] = field(default_factory=list)  # (iter, objective, note)
+    # (iteration, objective, note) for every accepted proposal
+    accepted: list[tuple[int, float, str]] = field(default_factory=list)
 
 
 def hill_climb(
-    world: WorldModel, suite: Suite, proposer: Proposer, iters: int, seed: int = 0,
+    world: WorldModel,
+    suite: Suite,
+    proposer: Proposer,
+    iters: int,
+    *,
+    seed: int = 0,
     verbose: bool = False,
 ) -> tuple[WorldModel, Scores, SearchLog]:
     rng = np.random.default_rng(seed)
@@ -38,19 +53,19 @@ def hill_climb(
     log = SearchLog([(0, best.objective, "init")])
     for it in range(1, iters + 1):
         try:
-            cand = proposer.propose(world, best, rng)
-            scores = suite.evaluate(cand)
+            proposal = proposer.propose(world, best, rng)
+            scores = suite.evaluate(proposal.world)
         except (SyntaxError, NameError, KeyError, ValueError):
             continue
         if scores.objective < best.objective and not suite.regressions(best, scores):
-            world, best = cand, scores
-            log.accepted.append((it, best.objective, getattr(cand.dynamics, "last_edit", "")))
+            world, best = proposal.world, scores
+            log.accepted.append((it, best.objective, proposal.note))
             if verbose:
-                print(f"[{it}] objective={best.objective:.4f}  {log.accepted[-1][2]}")
+                print(f"[{it}] objective={best.objective:.4f}  {proposal.note}")
     return world, best, log
 
 
-# --- random mutation of logic programs -------------------------------------------------
+# --- random mutation of logic programs ---------------------------------------
 
 
 class _Mutator:
@@ -65,48 +80,50 @@ class _Mutator:
 
     def mutate(self, expr: str) -> str:
         tree = ast.parse(expr, mode="eval")
-        nodes = [n for n in ast.walk(tree.body)]
-        target = self.rng.choice(nodes)
-        ops = [self._grow]
-        if isinstance(target, ast.Name):
-            ops.append(self._rename)
-        if isinstance(target, ast.Constant):
-            ops.append(self._bump)
-        if isinstance(target, ast.BoolOp):
-            ops += [self._flip_boolop, self._drop]
+        target = self.rng.choice(list(ast.walk(tree.body)))
+        ops: list[Callable[[], ast.Expression]] = [lambda: self._grow(tree)]
+        match target:
+            case ast.Name():
+                ops.append(lambda: self._rename(tree, target))
+            case ast.Constant():
+                ops.append(lambda: self._bump(tree, target))
+            case ast.BoolOp():
+                ops.append(lambda: self._flip_boolop(tree, target))
+                ops.append(lambda: self._drop(tree, target))
         if isinstance(target, (ast.Compare, ast.BoolOp, ast.UnaryOp)):
-            ops.append(self._negate)
-        new = self.rng.choice(ops)(tree, target)
+            ops.append(lambda: self._negate(tree, target))
+        new = self.rng.choice(ops)()
         ast.fix_missing_locations(new)
         return ast.unparse(new.body)
 
-    def _rename(self, tree, node):
+    def _rename(self, tree: ast.Expression, node: ast.Name) -> ast.Expression:
         node.id = self.rng.choice(self.vocab)
         return tree
 
-    def _bump(self, tree, node):
-        if isinstance(node.value, bool):
-            node.value = not node.value
-        else:
-            node.value = max(0, node.value + self.rng.choice([-1, 1]))
+    def _bump(self, tree: ast.Expression, node: ast.Constant) -> ast.Expression:
+        match node.value:
+            case bool(v):
+                node.value = not v
+            case int(v) | float(v):
+                node.value = max(0, v + self.rng.choice([-1, 1]))
         return tree
 
-    def _flip_boolop(self, tree, node):
+    def _flip_boolop(self, tree: ast.Expression, node: ast.BoolOp) -> ast.Expression:
         node.op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
         return tree
 
-    def _drop(self, tree, node):
+    def _drop(self, tree: ast.Expression, node: ast.BoolOp) -> ast.Expression:
         node.values.pop(self.rng.randrange(len(node.values)))
         if len(node.values) == 1:
             return _replace_node(tree, node, node.values[0])
         return tree
 
-    def _negate(self, tree, node):
+    def _negate(self, tree: ast.Expression, node: ast.expr) -> ast.Expression:
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
             return _replace_node(tree, node, node.operand)
         return _replace_node(tree, node, ast.UnaryOp(ast.Not(), copy.deepcopy(node)))
 
-    def _grow(self, tree, _node):
+    def _grow(self, tree: ast.Expression) -> ast.Expression:
         """Combine the whole rule with a new literal, e.g. `e` -> `e and X >= 1`,
         or turn a boolean rule into a graded one: `2 if e else 0`."""
         body = tree.body
@@ -119,7 +136,7 @@ class _Mutator:
         return tree
 
 
-def _replace_node(tree, old, new):
+def _replace_node(tree: ast.Expression, old: ast.expr, new: ast.expr) -> ast.Expression:
     if tree.body is old:
         tree.body = new
         return tree
@@ -140,21 +157,27 @@ class RandomLogicEdit:
 
     seed: int = 0
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         self._rng = random.Random(self.seed)
 
-    def propose(self, world: WorldModel, scores: Scores, rng: np.random.Generator) -> WorldModel:
-        dyn: LogicDynamics = world.dynamics
+    def propose(
+        self, world: WorldModel, scores: Scores, rng: np.random.Generator
+    ) -> Proposal:
+        dyn = world.dynamics
+        if not isinstance(dyn, LogicDynamics):
+            raise TypeError(f"RandomLogicEdit needs LogicDynamics, got {type(dyn)}")
         targets = list(dyn.rules) + [f"emit:{s}" for s in dyn.signal_rules]
         target = self._rng.choice(targets)
         mut = _Mutator(sorted(dyn.vocabulary), self._rng)
         if target.startswith("emit:"):
-            sig = target[5:]
+            sig = target.removeprefix("emit:")
             signal_rules = {**dyn.signal_rules, sig: mut.mutate(dyn.signal_rules[sig])}
-            new = LogicDynamics(dyn.schema, dyn.rules, signal_rules, dyn.rates, dyn.default_rate)
-            new.last_edit = f"emit {sig} <- {signal_rules[sig]}"
+            new = LogicDynamics(
+                dyn.schema, dyn.rules, signal_rules, dyn.rates, dyn.default_rate
+            )
+            note = f"emit {sig} <- {signal_rules[sig]}"
         else:
             expr = mut.mutate(dyn.rules[target])
             new = dyn.with_rule(target, expr)
-            new.last_edit = f"{target} <- {expr}"
-        return replace(world, dynamics=new)
+            note = f"{target} <- {expr}"
+        return Proposal(replace(world, dynamics=new), note)
