@@ -5,9 +5,9 @@ description = "Induce executable, shared-rule cell dynamics from single-cell dat
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",
-    "scipy>=1.11",
     "anndata>=0.10",
     "pydantic>=2.7",
+    "torch>=2.14.1",
 ]
 
 [dependency-groups]
@@ -16,7 +16,6 @@ dev = [
     "pre-commit>=3.7",
     "pytest>=8",
     "ruff>=0.5",
-    "scipy-stubs>=1.14",
     "pandas-stubs>=2.2",
 ]
 

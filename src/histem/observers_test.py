@@ -1,8 +1,9 @@
-import numpy as np
 import pytest
+import torch
 from pydantic import ValidationError
 
 from histem.observers import NBCountObserver
+from histem.state import Slot, StateSchema
 
 
 def test_weight_shape_must_match_genes_and_drivers() -> None:
@@ -10,8 +11,8 @@ def test_weight_shape_must_match_genes_and_drivers() -> None:
         NBCountObserver(
             genes=("g1", "g2"),
             drivers=("a",),
-            weights=np.zeros((3, 1)),
-            bias=np.zeros(2),
+            weights=torch.zeros((3, 1)),
+            bias=torch.zeros(2),
         )
 
 
@@ -20,7 +21,21 @@ def test_dispersion_must_be_positive() -> None:
         NBCountObserver(
             genes=("g1",),
             drivers=("a",),
-            weights=np.zeros((1, 1)),
-            bias=np.zeros(1),
+            weights=torch.zeros((1, 1)),
+            bias=torch.zeros(1),
             dispersion=0,
         )
+
+
+def test_nb_counts_have_requested_mean() -> None:
+    schema = StateSchema(slots=(Slot(name="s", variables=("a",)),))
+    obs = NBCountObserver(
+        genes=("g",),
+        drivers=("a",),
+        weights=torch.zeros((1, 1)),
+        bias=torch.tensor([2.0]),
+        size_sd=0.0,
+    )
+    torch.manual_seed(0)
+    counts = obs.observe(schema.empty(20_000))
+    assert abs(counts.mean().item() - torch.e**2) < 0.2

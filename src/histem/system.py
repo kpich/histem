@@ -1,7 +1,6 @@
 from collections.abc import Callable
 
-import anndata as ad
-import numpy as np
+import torch
 from pydantic import Field
 
 from histem.dynamics import CONTROL, Dynamics, Intervention
@@ -10,7 +9,7 @@ from histem.simulator import Signaling, simulate
 from histem.spec import FrozenSpec
 from histem.state import Population
 
-InitPrior = Callable[[int, np.random.Generator], Population]
+InitPrior = Callable[[int], Population]
 
 
 class CellSystem(FrozenSpec):
@@ -20,31 +19,20 @@ class CellSystem(FrozenSpec):
     burn_in: int = Field(50, ge=0)
     signaling: Signaling = Field(default_factory=Signaling)
 
-    def sample_cells(
-        self, n: int, rng: np.random.Generator, intervention: Intervention = CONTROL
-    ) -> Population:
+    def sample_cells(self, n: int, intervention: Intervention = CONTROL) -> Population:
         pop, _ = simulate(
             self.dynamics,
-            self.init(n, rng),
+            self.init(n),
             self.burn_in,
-            rng,
             intervention=intervention,
             signaling=self.signaling,
         )
         return pop
 
     def sample(
-        self,
-        n: int,
-        rng: np.random.Generator,
-        intervention: Intervention = CONTROL,
-        modality: str = "rna",
-    ) -> ad.AnnData:
-        adata = self.observers[modality].observe(
-            self.sample_cells(n, rng, intervention), rng
-        )
-        adata.obs["condition"] = intervention.name
-        return adata
+        self, n: int, intervention: Intervention = CONTROL, modality: str = "rna"
+    ) -> torch.Tensor:
+        return self.observers[modality].observe(self.sample_cells(n, intervention))
 
     def with_dynamics(self, dynamics: Dynamics) -> "CellSystem":
         return self.model_copy(update={"dynamics": dynamics})

@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
-import numpy as np
+import torch
 
 from histem.spec import FrozenSpec
 from histem.state import Population, StateSchema
@@ -25,7 +25,7 @@ CONTROL = Intervention()
 
 @dataclass
 class Inputs:
-    signals: np.ndarray  # (n, n_signals) received
+    signals: torch.Tensor  # (n, n_signals) received
     intervention: Intervention = field(default=CONTROL)
 
 
@@ -39,13 +39,11 @@ class Dynamics(Protocol):
     @property
     def signal_names(self) -> tuple[str, ...]: ...
 
-    def step(
-        self, pop: Population, inputs: Inputs, rng: np.random.Generator
-    ) -> Population:
+    def step(self, pop: Population, inputs: Inputs) -> Population:
         """Must not mutate `pop`."""
         ...
 
-    def emit_signals(self, pop: Population) -> np.ndarray:
+    def emit_signals(self, pop: Population) -> torch.Tensor:
         """(n, n_signals) secreted amounts; routing is the simulator's job."""
         ...
 
