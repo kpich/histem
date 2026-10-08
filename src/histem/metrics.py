@@ -4,8 +4,6 @@ Snapshot data has no cell-to-cell pairing between experiment and simulation, so 
 fit term compares distributions.
 """
 
-from __future__ import annotations
-
 import anndata as ad
 import numpy as np
 from scipy.spatial.distance import cdist

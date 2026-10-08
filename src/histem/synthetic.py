@@ -5,8 +5,6 @@ a MYC <-> mitochondria loop, and a PU1-secreted signal (IL) that opens CEBPA chr
 This is not meant to be biologically accurate; it exercises every part of the framework.
 """
 
-from __future__ import annotations
-
 import anndata as ad
 import numpy as np
 
@@ -21,10 +19,10 @@ from histem.world import WorldModel
 TFS = ("GATA1", "PU1", "FLI1", "KLF1", "CEBPA", "MYC")
 
 SCHEMA = StateSchema(
-    (
-        Slot("expr", TFS, levels=3, observed=True),
-        Slot("chromatin", ("acc_GATA1", "acc_CEBPA"), levels=2),
-        Slot("mito", ("mito_cn",), levels=3),
+    slots=(
+        Slot(name="expr", variables=TFS, levels=3, observed=True),
+        Slot(name="chromatin", variables=("acc_GATA1", "acc_CEBPA"), levels=2),
+        Slot(name="mito", variables=("mito_cn",), levels=3),
     )
 )
 
@@ -65,7 +63,9 @@ def make_observer(
         rows.append(np.zeros(len(DRIVERS)))
     weights = np.array(rows)
     bias = rng.uniform(-1.0, 1.5, len(genes))
-    return NBCountObserver(tuple(genes), DRIVERS, weights, bias)
+    return NBCountObserver(
+        genes=tuple(genes), drivers=DRIVERS, weights=weights, bias=bias
+    )
 
 
 def make_world(program: str = PROGRAM) -> WorldModel:
@@ -81,10 +81,11 @@ def make_world(program: str = PROGRAM) -> WorldModel:
 def perturbations() -> dict[str, Intervention]:
     out = {"control": CONTROL}
     for tf in TFS:
-        out[f"{tf}_KO"] = Intervention(f"{tf}_KO", ((tf, 0),))
-        out[f"{tf}_OE"] = Intervention(f"{tf}_OE", ((tf, 2),))
+        out[f"{tf}_KO"] = Intervention(name=f"{tf}_KO", clamps=((tf, 0),))
+        out[f"{tf}_OE"] = Intervention(name=f"{tf}_OE", clamps=((tf, 2),))
     for a, b in [("GATA1", "PU1"), ("FLI1", "KLF1"), ("PU1", "CEBPA")]:
-        out[f"{a}_KO+{b}_KO"] = Intervention(f"{a}_KO+{b}_KO", ((a, 0), (b, 0)))
+        name = f"{a}_KO+{b}_KO"
+        out[name] = Intervention(name=name, clamps=((a, 0), (b, 0)))
     return out
 
 
@@ -98,4 +99,4 @@ def make_dataset(
         world.sample(cells_per_condition, rng, iv) for iv in interventions.values()
     ]
     adata = ad.concat(parts, index_unique="-")
-    return Dataset("synthetic_fork", adata, interventions)
+    return Dataset(name="synthetic_fork", adata=adata, interventions=interventions)

@@ -5,23 +5,31 @@ lives here. A slot is a named block of variables such as expression nodes, chrom
 accessibility, mitochondrial state, or free latent variables.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal, Self
 
 import numpy as np
+from pydantic import Field, model_validator
+
+from histem.spec import FrozenSpec
 
 SlotKind = Literal["discrete", "continuous"]
 
 
-@dataclass(frozen=True)
-class Slot:
+class Slot(FrozenSpec):
     name: str
-    variables: tuple[str, ...]
+    variables: tuple[str, ...] = Field(min_length=1)
     kind: SlotKind = "discrete"
     levels: int = 2  # discrete only: values are 0..levels-1
     observed: bool = False  # can some Observer read this slot directly?
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        if self.kind == "discrete" and not 2 <= self.levels <= 127:  # stored as int8
+            raise ValueError(f"slot {self.name!r}: levels must be in [2, 127]")
+        if len(set(self.variables)) != len(self.variables):
+            raise ValueError(f"slot {self.name!r}: duplicate variable names")
+        return self
 
     @property
     def dim(self) -> int:
@@ -32,17 +40,21 @@ class Slot:
         return np.int8 if self.kind == "discrete" else np.float32
 
 
-@dataclass(frozen=True)
-class StateSchema:
-    slots: tuple[Slot, ...]
+class StateSchema(FrozenSpec):
+    slots: tuple[Slot, ...] = Field(min_length=1)
 
-    def __post_init__(self) -> None:
+    @model_validator(mode="after")
+    def _check(self) -> Self:
         names = [v for s in self.slots for v in s.variables]
         dupes = {n for n in names if names.count(n) > 1}
         if dupes:
             raise ValueError(
                 f"variable names must be unique across slots: {sorted(dupes)}"
             )
+        slot_names = [s.name for s in self.slots]
+        if len(set(slot_names)) != len(slot_names):
+            raise ValueError("slot names must be unique")
+        return self
 
     def slot(self, name: str) -> Slot:
         for s in self.slots:
@@ -61,12 +73,12 @@ class StateSchema:
     def variables(self) -> list[str]:
         return [v for s in self.slots for v in s.variables]
 
-    def empty(self, n: int) -> Population:
+    def empty(self, n: int) -> "Population":
         return Population(
             self, {s.name: np.zeros((n, s.dim), s.dtype) for s in self.slots}
         )
 
-    def uniform(self, n: int, rng: np.random.Generator) -> Population:
+    def uniform(self, n: int, rng: np.random.Generator) -> "Population":
         """Discrete slots uniform over levels, continuous slots standard normal."""
         values = {}
         for s in self.slots:
@@ -84,7 +96,7 @@ class Population:
     schema: StateSchema
     values: dict[str, np.ndarray]
     positions: np.ndarray | None = None  # (n, d) spatial coordinates, if any
-    meta: dict = field(default_factory=dict)
+    meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def n(self) -> int:
@@ -102,7 +114,7 @@ class Population:
             for i, v in enumerate(s.variables)
         }
 
-    def copy(self) -> Population:
+    def copy(self) -> "Population":
         pos = None if self.positions is None else self.positions.copy()
         return Population(
             self.schema,
@@ -111,7 +123,7 @@ class Population:
             dict(self.meta),
         )
 
-    def subset(self, idx: np.ndarray | slice) -> Population:
+    def subset(self, idx: np.ndarray | slice) -> "Population":
         pos = None if self.positions is None else self.positions[idx]
         return Population(
             self.schema,

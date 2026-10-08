@@ -5,24 +5,22 @@ baseline; an LLM proposer (read the program text + per-condition scores, return 
 edited program) plugs in at the same place.
 """
 
-from __future__ import annotations
-
 import ast
 import copy
 import random
 from collections.abc import Callable
-from dataclasses import dataclass, field, replace
 from typing import Protocol
 
 import numpy as np
+from pydantic import Field, PrivateAttr
 
 from histem.models.logic import LogicDynamics
+from histem.spec import FrozenSpec, Spec
 from histem.suite import Scores, Suite
 from histem.world import WorldModel
 
 
-@dataclass
-class Proposal:
+class Proposal(FrozenSpec):
     world: WorldModel
     note: str = ""  # human-readable description of the edit, for logs
 
@@ -33,10 +31,9 @@ class Proposer(Protocol):
     ) -> Proposal: ...
 
 
-@dataclass
-class SearchLog:
+class SearchLog(Spec):
     # (iteration, objective, note) for every accepted proposal
-    accepted: list[tuple[int, float, str]] = field(default_factory=list)
+    accepted: list[tuple[int, float, str]] = Field(default_factory=list)
 
 
 def hill_climb(
@@ -50,14 +47,14 @@ def hill_climb(
 ) -> tuple[WorldModel, Scores, SearchLog]:
     rng = np.random.default_rng(seed)
     best = suite.evaluate(world)
-    log = SearchLog([(0, best.objective, "init")])
+    log = SearchLog(accepted=[(0, best.objective, "init")])
     for it in range(1, iters + 1):
         try:
             proposal = proposer.propose(world, best, rng)
             scores = suite.evaluate(proposal.world)
-        except (SyntaxError, NameError, KeyError, ValueError):
+        except (KeyError, ValueError):  # invalid proposals (incl. RuleError)
             continue
-        if scores.objective < best.objective and not suite.regressions(best, scores):
+        if scores.objective < best.objective and not Suite.regressions(best, scores):
             world, best = proposal.world, scores
             log.accepted.append((it, best.objective, proposal.note))
             if verbose:
@@ -151,13 +148,13 @@ def _replace_node(tree: ast.Expression, old: ast.expr, new: ast.expr) -> ast.Exp
     return tree
 
 
-@dataclass
-class RandomLogicEdit:
+class RandomLogicEdit(Spec):
     """Mutate one rule of a LogicDynamics at random."""
 
     seed: int = 0
+    _rng: random.Random = PrivateAttr()
 
-    def __post_init__(self) -> None:
+    def model_post_init(self, context: object) -> None:
         self._rng = random.Random(self.seed)
 
     def propose(
@@ -171,13 +168,11 @@ class RandomLogicEdit:
         mut = _Mutator(sorted(dyn.vocabulary), self._rng)
         if target.startswith("emit:"):
             sig = target.removeprefix("emit:")
-            signal_rules = {**dyn.signal_rules, sig: mut.mutate(dyn.signal_rules[sig])}
-            new = LogicDynamics(
-                dyn.schema, dyn.rules, signal_rules, dyn.rates, dyn.default_rate
-            )
-            note = f"emit {sig} <- {signal_rules[sig]}"
+            expr = mut.mutate(dyn.signal_rules[sig])
+            new = dyn.with_rules(signal_rules={sig: expr})
+            note = f"emit {sig} <- {expr}"
         else:
             expr = mut.mutate(dyn.rules[target])
-            new = dyn.with_rule(target, expr)
+            new = dyn.with_rules(rules={target: expr})
             note = f"{target} <- {expr}"
-        return Proposal(replace(world, dynamics=new), note)
+        return Proposal(world=world.with_dynamics(new), note=note)

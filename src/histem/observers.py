@@ -4,20 +4,21 @@ Each modality (scRNA counts, ATAC, spatial, Hi-C, ...) is an Observer. Adding a 
 type means adding an Observer; the Dynamics don't change.
 """
 
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Protocol
+from typing import Protocol, Self, runtime_checkable
 
 import anndata as ad
 import numpy as np
 import pandas as pd
+from pydantic import Field, model_validator
 
+from histem.spec import FrozenSpec
 from histem.state import Population
 
 
+@runtime_checkable
 class Observer(Protocol):
-    modality: str
+    @property
+    def modality(self) -> str: ...
 
     def observe(self, pop: Population, rng: np.random.Generator) -> ad.AnnData: ...
 
@@ -34,20 +35,30 @@ def state_features(pop: Population, variables: tuple[str, ...]) -> np.ndarray:
     return np.stack(cols, axis=1)
 
 
-@dataclass
-class NBCountObserver:
+class NBCountObserver(FrozenSpec):
     """scRNA-like counts.
 
     log mean_g = log(size) + bias_g + weights_g . features(state)
     """
 
-    genes: tuple[str, ...]
-    drivers: tuple[str, ...]  # state variables the counts depend on
+    genes: tuple[str, ...] = Field(min_length=1)
+    drivers: tuple[str, ...] = Field(min_length=1)  # state variables counts depend on
     weights: np.ndarray  # (n_genes, n_drivers)
     bias: np.ndarray  # (n_genes,)
-    dispersion: float = 5.0  # NB theta; larger = closer to Poisson
-    size_sd: float = 0.3  # lognormal per-cell library-size noise
+    dispersion: float = Field(5.0, gt=0)  # NB theta; larger = closer to Poisson
+    size_sd: float = Field(0.3, ge=0)  # lognormal per-cell library-size noise
     modality: str = "rna"
+
+    @model_validator(mode="after")
+    def _check(self) -> Self:
+        expected = (len(self.genes), len(self.drivers))
+        if self.weights.shape != expected:
+            raise ValueError(f"weights shape {self.weights.shape} != {expected}")
+        if self.bias.shape != (len(self.genes),):
+            raise ValueError(f"bias shape {self.bias.shape} != ({len(self.genes)},)")
+        if len(set(self.genes)) != len(self.genes):
+            raise ValueError("duplicate gene names")
+        return self
 
     def mean(self, pop: Population, rng: np.random.Generator) -> np.ndarray:
         size = np.exp(rng.normal(0.0, self.size_sd, (pop.n, 1)))

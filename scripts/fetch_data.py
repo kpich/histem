@@ -8,8 +8,6 @@ Perturb-seq files come from the scPerturb harmonised h5ad collection on Zenodo; 
 are checked against the Zenodo API.
 """
 
-from __future__ import annotations
-
 import argparse
 import hashlib
 import json

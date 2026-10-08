@@ -13,8 +13,8 @@ lint:
 	uv run ruff format --check .
 
 format:
-	uv run ruff check --fix .
 	uv run ruff format .
+	uv run ruff check --fix .
 
 typecheck:
 	uv run mypy

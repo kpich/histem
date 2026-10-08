@@ -6,18 +6,16 @@ discrete-diffusion kernel, a distilled neural emulator, ...) qualifies if it imp
 inputs, sample the next state. Unconditional generators do not satisfy this contract.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 import numpy as np
 
+from histem.spec import FrozenSpec
 from histem.state import Population, StateSchema
 
 
-@dataclass(frozen=True)
-class Intervention:
+class Intervention(FrozenSpec):
     """An experimental condition, independent of any particular Dynamics.
 
     `clamps` pins variables to fixed values after every step (knockout = clamp to 0,
@@ -48,8 +46,11 @@ class Inputs:
 
 @runtime_checkable
 class Dynamics(Protocol):
-    schema: StateSchema
-    signal_names: tuple[str, ...]
+    @property
+    def state_schema(self) -> StateSchema: ...
+
+    @property
+    def signal_names(self) -> tuple[str, ...]: ...
 
     def step(
         self, pop: Population, inputs: Inputs, rng: np.random.Generator
@@ -64,7 +65,7 @@ class Dynamics(Protocol):
         """
         ...
 
-    def intervene(self, intervention: Intervention) -> Dynamics:
+    def intervene(self, intervention: Intervention) -> "Dynamics":
         """A Dynamics modified by the intervention's representation-specific effects.
         Clamps are applied by the Simulator, so most implementations return self."""
         ...

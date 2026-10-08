@@ -6,10 +6,7 @@ random rule edits. Baseline for any smarter Proposer (LLM edits, distillation, .
     uv run scripts/synthetic_recovery.py --iters 500
 """
 
-from __future__ import annotations
-
 import argparse
-from dataclasses import replace
 
 from histem import synthetic
 from histem.learners.search import RandomLogicEdit, hill_climb
@@ -30,16 +27,16 @@ def main() -> None:
     truth = synthetic.make_world()
     assert isinstance(truth.dynamics, LogicDynamics)
     train, test = synthetic.make_dataset(truth).split(args.held_out)
-    suite = Suite([train], complexity_weight=args.complexity_weight)
-    test_suite = Suite([test], complexity_weight=args.complexity_weight)
+    suite = Suite(datasets=[train], complexity_weight=args.complexity_weight)
+    test_suite = Suite(datasets=[test], complexity_weight=args.complexity_weight)
 
     null = LogicDynamics(
-        synthetic.SCHEMA,
-        {v: v for v in synthetic.SCHEMA.variables},
-        dict.fromkeys(truth.dynamics.signal_rules, "0.0"),
-        truth.dynamics.rates,
+        state_schema=synthetic.SCHEMA,
+        rules={v: v for v in synthetic.SCHEMA.variables},
+        signal_rules=dict.fromkeys(truth.dynamics.signal_rules, "0.0"),
+        rates=truth.dynamics.rates,
     )
-    start = replace(truth, dynamics=null)
+    start = truth.with_dynamics(null)
 
     for name, w in [("truth", truth), ("null", start)]:
         s = suite.evaluate(w)
@@ -51,7 +48,7 @@ def main() -> None:
     found, scores, log = hill_climb(
         start,
         suite,
-        RandomLogicEdit(args.seed),
+        RandomLogicEdit(seed=args.seed),
         args.iters,
         seed=args.seed,
         verbose=True,

@@ -17,16 +17,16 @@ Expressions are a vectorised Python subset: and/or/not, comparisons, + - *,
 `x if c else y`, min/max, and numeric constants.
 """
 
-from __future__ import annotations
-
 import ast
 import math
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from typing import Self
 
 import numpy as np
+from pydantic import Field, PrivateAttr, model_validator
 
 from histem.dynamics import Inputs, Intervention
+from histem.spec import FrozenSpec
 from histem.state import Population, StateSchema
 
 Env = dict[str, np.ndarray]
@@ -43,9 +43,17 @@ _CMP = {
 _BIN = {ast.Add: np.add, ast.Sub: np.subtract, ast.Mult: np.multiply}
 
 
+class RuleError(ValueError):
+    """A rule that doesn't parse, uses unsupported syntax, or names unknowns."""
+
+
 def compile_expr(source: str | ast.expr, names: set[str]) -> Compiled:
-    node = ast.parse(source, mode="eval").body if isinstance(source, str) else source
-    return _compile(node, names)
+    if isinstance(source, str):
+        try:
+            source = ast.parse(source, mode="eval").body
+        except SyntaxError as e:
+            raise RuleError(f"cannot parse rule {source!r}: {e.msg}") from e
+    return _compile(source, names)
 
 
 def _compile(node: ast.expr, names: set[str]) -> Compiled:
@@ -54,7 +62,7 @@ def _compile(node: ast.expr, names: set[str]) -> Compiled:
             return lambda env: np.asarray(v, np.float32)
         case ast.Name(id=name):
             if name not in names:
-                raise NameError(f"unknown variable {name!r}")
+                raise RuleError(f"unknown variable {name!r}")
             return lambda env: env[name]
         case ast.BoolOp(op=op, values=values):
             parts = [_compile(v, names) for v in values]
@@ -92,7 +100,7 @@ def _compile(node: ast.expr, names: set[str]) -> Compiled:
             ps = [_compile(a, names) for a in args]
             mm_f: np.ufunc = np.minimum if fn == "min" else np.maximum
             return lambda env: mm_f.reduce([np.asarray(p(env), np.float32) for p in ps])
-    raise SyntaxError(f"unsupported expression: {ast.unparse(node)}")
+    raise RuleError(f"unsupported expression: {ast.unparse(node)}")
 
 
 def expr_size(source: str) -> int:
@@ -105,31 +113,39 @@ def expr_size(source: str) -> int:
     )
 
 
-@dataclass
-class LogicDynamics:
-    schema: StateSchema
+class LogicDynamics(FrozenSpec):
+    state_schema: StateSchema
     rules: dict[str, str]  # target variable -> expression
-    signal_rules: dict[str, str] = field(
-        default_factory=dict
-    )  # signal -> emitted amount
-    rates: dict[str, float] = field(default_factory=dict)
-    default_rate: float = 0.5
-    signal_names: tuple[str, ...] = field(init=False)
+    signal_rules: dict[str, str] = Field(default_factory=dict)  # signal -> amount
+    rates: dict[str, float] = Field(default_factory=dict)
+    default_rate: float = Field(0.5, gt=0, le=1)
 
-    def __post_init__(self) -> None:
-        self.signal_names = tuple(self.signal_rules)
+    _rules: dict[str, Compiled] = PrivateAttr()
+    _signals: dict[str, Compiled] = PrivateAttr()
+
+    @model_validator(mode="after")
+    def _compile_rules(self) -> Self:
+        variables = set(self.state_schema.variables)
+        if unknown := set(self.rules) - variables:
+            raise ValueError(f"rules for variables not in schema: {sorted(unknown)}")
+        if unknown := set(self.rates) - set(self.rules):
+            raise ValueError(f"rates for variables without rules: {sorted(unknown)}")
+        if bad := {v: r for v, r in self.rates.items() if not 0 < r <= 1}:
+            raise ValueError(f"rates must be in (0, 1]: {bad}")
         names = self.vocabulary
-        unknown = set(self.rules) - set(self.schema.variables)
-        if unknown:
-            raise KeyError(f"rules for variables not in schema: {sorted(unknown)}")
         self._rules = {v: compile_expr(e, names) for v, e in self.rules.items()}
         self._signals = {
             s: compile_expr(e, names) for s, e in self.signal_rules.items()
         }
+        return self
+
+    @property
+    def signal_names(self) -> tuple[str, ...]:
+        return tuple(self.signal_rules)
 
     @property
     def vocabulary(self) -> set[str]:
-        return set(self.schema.variables) | {f"in_{s}" for s in self.signal_names}
+        return set(self.state_schema.variables) | {f"in_{s}" for s in self.signal_names}
 
     # --- Dynamics protocol ---------------------------------------------------
 
@@ -143,8 +159,8 @@ class LogicDynamics:
 
         out = pop.copy()
         for v, target in targets.items():
-            slot_name, i = self.schema.locate(v)
-            slot = self.schema.slot(slot_name)
+            slot_name, i = self.state_schema.locate(v)
+            slot = self.state_schema.slot(slot_name)
             fire = rng.random(pop.n) < self.rates.get(v, self.default_rate)
             cur = pop.values[slot_name][:, i]
             if slot.kind == "discrete":
@@ -172,7 +188,7 @@ class LogicDynamics:
             axis=1,
         ).astype(np.float32)
 
-    def intervene(self, intervention: Intervention) -> LogicDynamics:
+    def intervene(self, intervention: Intervention) -> Self:
         return self
 
     def description_length(self) -> float:
@@ -183,11 +199,18 @@ class LogicDynamics:
 
     # --- text form -----------------------------------------------------------
 
-    def with_rule(self, target: str, expr: str) -> LogicDynamics:
-        rules = dict(self.rules)
-        rules[target] = expr
+    def with_rules(
+        self,
+        rules: dict[str, str] | None = None,
+        signal_rules: dict[str, str] | None = None,
+    ) -> "LogicDynamics":
+        """A validated copy with some rules replaced."""
         return LogicDynamics(
-            self.schema, rules, self.signal_rules, self.rates, self.default_rate
+            state_schema=self.state_schema,
+            rules={**self.rules, **(rules or {})},
+            signal_rules={**self.signal_rules, **(signal_rules or {})},
+            rates=self.rates,
+            default_rate=self.default_rate,
         )
 
     def to_text(self) -> str:
@@ -199,8 +222,10 @@ class LogicDynamics:
     @classmethod
     def from_text(
         cls, schema: StateSchema, text: str, default_rate: float = 0.5
-    ) -> LogicDynamics:
-        rules, signals, rates = {}, {}, {}
+    ) -> Self:
+        rules: dict[str, str] = {}
+        signals: dict[str, str] = {}
+        rates: dict[str, float] = {}
         for raw in text.splitlines():
             line = raw.split("#", 1)[0].strip()
             if not line:
@@ -211,7 +236,15 @@ class LogicDynamics:
             elif line.startswith("emit "):
                 s, e = line[5:].split("<-", 1)
                 signals[s.strip()] = e.strip()
-            else:
+            elif "<-" in line:
                 v, e = line.split("<-", 1)
                 rules[v.strip()] = e.strip()
-        return cls(schema, rules, signals, rates, default_rate)
+            else:
+                raise RuleError(f"cannot parse program line: {raw!r}")
+        return cls(
+            state_schema=schema,
+            rules=rules,
+            signal_rules=signals,
+            rates=rates,
+            default_rate=default_rate,
+        )
