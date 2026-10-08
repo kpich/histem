@@ -1,10 +1,11 @@
 from histem.dynamics import CONTROL, Dynamics, Inputs, Intervention
 from histem.simulator import Signaling, simulate
 from histem.state import Population, Slot, StateSchema
-from histem.world import WorldModel
+from histem.system import CellSystem
 
 __all__ = [
     "CONTROL",
+    "CellSystem",
     "Dynamics",
     "Inputs",
     "Intervention",
@@ -12,6 +13,5 @@ __all__ = [
     "Signaling",
     "Slot",
     "StateSchema",
-    "WorldModel",
     "simulate",
 ]

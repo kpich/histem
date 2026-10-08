@@ -1,4 +1,4 @@
-.PHONY: install install-precommit-hooks check lint format typecheck test int-test
+.PHONY: install install-precommit-hooks check lint format typecheck test int-test recovery
 
 install:
 	uv sync
@@ -24,3 +24,8 @@ test:
 
 int-test:
 	uv run pytest tests
+
+ITERS ?= 300
+
+recovery:
+	uv run scripts/synthetic_recovery.py --iters $(ITERS)

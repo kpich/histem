@@ -10,17 +10,17 @@ from pydantic import Field, PrivateAttr
 from histem.models.logic import LogicDynamics
 from histem.spec import FrozenSpec, Spec
 from histem.suite import Scores, Suite
-from histem.world import WorldModel
+from histem.system import CellSystem
 
 
 class Proposal(FrozenSpec):
-    world: WorldModel
+    system: CellSystem
     note: str = ""
 
 
 class Proposer(Protocol):
     def propose(
-        self, world: WorldModel, scores: Scores, rng: np.random.Generator
+        self, system: CellSystem, scores: Scores, rng: np.random.Generator
     ) -> Proposal: ...
 
 
@@ -30,29 +30,29 @@ class SearchLog(Spec):
 
 
 def hill_climb(
-    world: WorldModel,
+    system: CellSystem,
     suite: Suite,
     proposer: Proposer,
     iters: int,
     *,
     seed: int = 0,
     verbose: bool = False,
-) -> tuple[WorldModel, Scores, SearchLog]:
+) -> tuple[CellSystem, Scores, SearchLog]:
     rng = np.random.default_rng(seed)
-    best = suite.evaluate(world)
+    best = suite.evaluate(system)
     log = SearchLog(accepted=[(0, best.objective, "init")])
     for it in range(1, iters + 1):
         try:
-            proposal = proposer.propose(world, best, rng)
-            scores = suite.evaluate(proposal.world)
+            proposal = proposer.propose(system, best, rng)
+            scores = suite.evaluate(proposal.system)
         except (KeyError, ValueError):
             continue
         if scores.objective < best.objective and not Suite.regressions(best, scores):
-            world, best = proposal.world, scores
+            system, best = proposal.system, scores
             log.accepted.append((it, best.objective, proposal.note))
             if verbose:
                 print(f"[{it}] objective={best.objective:.4f}  {proposal.note}")
-    return world, best, log
+    return system, best, log
 
 
 class _Mutator:
@@ -145,9 +145,9 @@ class RandomLogicEdit(Spec):
         self._rng = random.Random(self.seed)
 
     def propose(
-        self, world: WorldModel, scores: Scores, rng: np.random.Generator
+        self, system: CellSystem, scores: Scores, rng: np.random.Generator
     ) -> Proposal:
-        dyn = world.dynamics
+        dyn = system.dynamics
         if not isinstance(dyn, LogicDynamics):
             raise TypeError(f"RandomLogicEdit needs LogicDynamics, got {type(dyn)}")
         targets = list(dyn.rules) + [f"emit:{s}" for s in dyn.signal_rules]
@@ -162,4 +162,4 @@ class RandomLogicEdit(Spec):
             expr = mut.mutate(dyn.rules[target])
             new = dyn.with_rules(rules={target: expr})
             note = f"{target} <- {expr}"
-        return Proposal(world=world.with_dynamics(new), note=note)
+        return Proposal(system=system.with_dynamics(new), note=note)

@@ -13,7 +13,7 @@ from histem.state import Population
 InitPrior = Callable[[int, np.random.Generator], Population]
 
 
-class WorldModel(FrozenSpec):
+class CellSystem(FrozenSpec):
     dynamics: Dynamics
     observers: dict[str, Observer]
     init: InitPrior
@@ -46,7 +46,7 @@ class WorldModel(FrozenSpec):
         adata.obs["condition"] = intervention.name
         return adata
 
-    def with_dynamics(self, dynamics: Dynamics) -> "WorldModel":
+    def with_dynamics(self, dynamics: Dynamics) -> "CellSystem":
         return self.model_copy(update={"dynamics": dynamics})
 
     def description_length(self) -> float:

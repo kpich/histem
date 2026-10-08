@@ -4,7 +4,7 @@ from pydantic import Field
 from histem.data import Dataset
 from histem.metrics import population_distance
 from histem.spec import FrozenSpec, Spec
-from histem.world import WorldModel
+from histem.system import CellSystem
 
 
 class Scores(FrozenSpec):
@@ -31,19 +31,19 @@ class Suite(Spec):
             raise ValueError(f"dataset {dataset.name!r} already in suite")
         self.datasets.append(dataset)
 
-    def evaluate(self, world: WorldModel) -> Scores:
+    def evaluate(self, system: CellSystem) -> Scores:
         rng = np.random.default_rng(self.seed)
         fit = {}
         for ds in self.datasets:
             for cond in ds.conditions:
                 observed = ds.cells(cond)
-                sim = world.sample(
+                sim = system.sample(
                     self.cells_per_condition, rng, ds.interventions[cond], ds.modality
                 )
                 fit[(ds.name, cond)] = population_distance(observed, sim, rng=rng)
         if not fit:
             raise ValueError("suite has no (dataset, condition) pairs to score")
-        dl = world.description_length()
+        dl = system.description_length()
         objective = float(np.mean(list(fit.values()))) + self.complexity_weight * dl
         return Scores(fit=fit, description_length=dl, objective=objective)
 

@@ -1,4 +1,4 @@
-"""Toy ground-truth world: GATA1/PU1 fork, chromatin gates, MYC/mito loop, IL signal."""
+"""Toy ground truth: GATA1/PU1 fork, chromatin gates, MYC/mito loop, IL signal."""
 
 import anndata as ad
 import numpy as np
@@ -9,7 +9,7 @@ from histem.models.logic import LogicDynamics
 from histem.observers import NBCountObserver
 from histem.simulator import Signaling
 from histem.state import Slot, StateSchema
-from histem.world import WorldModel
+from histem.system import CellSystem
 
 TFS = ("GATA1", "PU1", "FLI1", "KLF1", "CEBPA", "MYC")
 
@@ -63,8 +63,8 @@ def make_observer(
     )
 
 
-def make_world(program: str = PROGRAM) -> WorldModel:
-    return WorldModel(
+def make_system(program: str = PROGRAM) -> CellSystem:
+    return CellSystem(
         dynamics=LogicDynamics.from_text(SCHEMA, program),
         observers={"rna": make_observer()},
         init=SCHEMA.uniform,
@@ -85,13 +85,13 @@ def perturbations() -> dict[str, Intervention]:
 
 
 def make_dataset(
-    world: WorldModel | None = None, cells_per_condition: int = 300, seed: int = 1
+    system: CellSystem | None = None, cells_per_condition: int = 300, seed: int = 1
 ) -> Dataset:
-    world = world or make_world()
+    system = system or make_system()
     rng = np.random.default_rng(seed)
     interventions = perturbations()
     parts = [
-        world.sample(cells_per_condition, rng, iv) for iv in interventions.values()
+        system.sample(cells_per_condition, rng, iv) for iv in interventions.values()
     ]
     adata = ad.concat(parts, index_unique="-")
     return Dataset(name="synthetic_fork", adata=adata, interventions=interventions)

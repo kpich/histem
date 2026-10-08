@@ -11,7 +11,7 @@ SCHEMA = StateSchema(slots=(Slot(name="s", variables=("a", "b"), levels=3),))
 
 
 def test_logic_dynamics_satisfies_protocol() -> None:
-    assert isinstance(synthetic.make_world().dynamics, Dynamics)
+    assert isinstance(synthetic.make_system().dynamics, Dynamics)
 
 
 def test_expression_compiler_is_vectorised() -> None:
@@ -42,7 +42,7 @@ def test_invalid_programs_rejected(kwargs: dict[str, object], match: str) -> Non
 
 
 def test_program_text_round_trips() -> None:
-    dyn = synthetic.make_world().dynamics
+    dyn = synthetic.make_system().dynamics
     assert isinstance(dyn, LogicDynamics)
     again = LogicDynamics.from_text(synthetic.SCHEMA, dyn.to_text())
     assert again.rules == dyn.rules

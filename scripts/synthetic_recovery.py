@@ -18,7 +18,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
-    truth = synthetic.make_world()
+    truth = synthetic.make_system()
     assert isinstance(truth.dynamics, LogicDynamics)
     train, test = synthetic.make_dataset(truth).split(args.held_out)
     suite = Suite(datasets=[train], complexity_weight=args.complexity_weight)
