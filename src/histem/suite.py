@@ -1,0 +1,56 @@
+import numpy as np
+from pydantic import Field
+
+from histem.data import Dataset
+from histem.metrics import population_distance
+from histem.spec import FrozenSpec, Spec
+from histem.system import CellSystem
+
+
+class Scores(FrozenSpec):
+    fit: dict[tuple[str, str], float]  # (dataset, condition) -> distance
+    description_length: float
+    objective: float
+
+    def by_dataset(self) -> dict[str, float]:
+        out: dict[str, list[float]] = {}
+        for (ds, _), v in self.fit.items():
+            out.setdefault(ds, []).append(v)
+        return {k: float(np.mean(v)) for k, v in out.items()}
+
+
+class Suite(Spec):
+    datasets: list[Dataset] = Field(default_factory=list)
+    complexity_weight: float = Field(1e-3, ge=0)
+    cells_per_condition: int = Field(300, gt=0)
+    # same seed for every candidate, so score differences aren't sampling noise
+    seed: int = 0
+
+    def add(self, dataset: Dataset) -> None:
+        if any(d.name == dataset.name for d in self.datasets):
+            raise ValueError(f"dataset {dataset.name!r} already in suite")
+        self.datasets.append(dataset)
+
+    def evaluate(self, system: CellSystem) -> Scores:
+        rng = np.random.default_rng(self.seed)
+        fit = {}
+        for ds in self.datasets:
+            for cond in ds.conditions:
+                observed = ds.cells(cond)
+                sim = system.sample(
+                    self.cells_per_condition, rng, ds.interventions[cond], ds.modality
+                )
+                fit[(ds.name, cond)] = population_distance(observed, sim, rng=rng)
+        if not fit:
+            raise ValueError("suite has no (dataset, condition) pairs to score")
+        dl = system.description_length()
+        objective = float(np.mean(list(fit.values()))) + self.complexity_weight * dl
+        return Scores(fit=fit, description_length=dl, objective=objective)
+
+    @staticmethod
+    def regressions(
+        before: Scores, after: Scores, tolerance: float = 0.05
+    ) -> list[str]:
+        """Datasets whose mean fit got worse by more than `tolerance` (relative)."""
+        b, a = before.by_dataset(), after.by_dataset()
+        return [k for k in b if k in a and a[k] > b[k] * (1 + tolerance)]
