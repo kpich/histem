@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Any, Literal, Self
 
-import numpy as np
+import torch
 from pydantic import Field, model_validator
 
 from histem.spec import FrozenSpec
@@ -29,8 +29,8 @@ class Slot(FrozenSpec):
         return len(self.variables)
 
     @property
-    def dtype(self) -> type[np.generic]:
-        return np.int8 if self.kind == "discrete" else np.float32
+    def dtype(self) -> torch.dtype:
+        return torch.int8 if self.kind == "discrete" else torch.float32
 
 
 class StateSchema(FrozenSpec):
@@ -66,19 +66,25 @@ class StateSchema(FrozenSpec):
     def variables(self) -> list[str]:
         return [v for s in self.slots for v in s.variables]
 
-    def empty(self, n: int) -> "Population":
+    def empty(self, n: int, device: torch.device | str = "cpu") -> "Population":
         return Population(
-            self, {s.name: np.zeros((n, s.dim), s.dtype) for s in self.slots}
+            self,
+            {
+                s.name: torch.zeros((n, s.dim), dtype=s.dtype, device=device)
+                for s in self.slots
+            },
         )
 
-    def uniform(self, n: int, rng: np.random.Generator) -> "Population":
+    def uniform(self, n: int, device: torch.device | str = "cpu") -> "Population":
         """Discrete slots uniform over levels, continuous slots standard normal."""
         values = {}
         for s in self.slots:
             if s.kind == "discrete":
-                values[s.name] = rng.integers(0, s.levels, (n, s.dim)).astype(s.dtype)
+                values[s.name] = torch.randint(
+                    0, s.levels, (n, s.dim), dtype=s.dtype, device=device
+                )
             else:
-                values[s.name] = rng.standard_normal((n, s.dim)).astype(s.dtype)
+                values[s.name] = torch.randn((n, s.dim), device=device)
         return Population(self, values)
 
 
@@ -87,19 +93,19 @@ class Population:
     """`values[slot]` has shape (n_cells, slot.dim)."""
 
     schema: StateSchema
-    values: dict[str, np.ndarray]
-    positions: np.ndarray | None = None  # (n, d)
+    values: dict[str, torch.Tensor]
+    positions: torch.Tensor | None = None  # (n, d)
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def n(self) -> int:
         return int(next(iter(self.values.values())).shape[0])
 
-    def get(self, variable: str) -> np.ndarray:
+    def get(self, variable: str) -> torch.Tensor:
         slot, i = self.schema.locate(variable)
         return self.values[slot][:, i]
 
-    def variable_view(self) -> dict[str, np.ndarray]:
+    def variable_view(self) -> dict[str, torch.Tensor]:
         """Flat {variable: (n,) array} view, without copying."""
         return {
             v: self.values[s.name][:, i]
@@ -107,16 +113,20 @@ class Population:
             for i, v in enumerate(s.variables)
         }
 
+    @property
+    def device(self) -> torch.device:
+        return next(iter(self.values.values())).device
+
     def copy(self) -> "Population":
-        pos = None if self.positions is None else self.positions.copy()
+        pos = None if self.positions is None else self.positions.clone()
         return Population(
             self.schema,
-            {k: v.copy() for k, v in self.values.items()},
+            {k: v.clone() for k, v in self.values.items()},
             pos,
             dict(self.meta),
         )
 
-    def subset(self, idx: np.ndarray | slice) -> "Population":
+    def subset(self, idx: torch.Tensor | slice) -> "Population":
         pos = None if self.positions is None else self.positions[idx]
         return Population(
             self.schema,

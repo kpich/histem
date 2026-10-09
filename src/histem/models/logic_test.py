@@ -1,5 +1,5 @@
-import numpy as np
 import pytest
+import torch
 from pydantic import ValidationError
 
 from histem import synthetic
@@ -17,7 +17,7 @@ def test_logic_dynamics_satisfies_protocol() -> None:
 def test_expression_compiler_is_vectorised() -> None:
     rule = "2 if (a >= 1 and not b >= 2) or max(a, b) == 0 else 0"
     f = compile_expr(rule, {"a", "b"})
-    out = f({"a": np.array([1, 0, 1, 0]), "b": np.array([0, 0, 2, 1])})
+    out = f({"a": torch.tensor([1, 0, 1, 0]), "b": torch.tensor([0, 0, 2, 1])})
     assert out.tolist() == [2, 2, 0, 0]
 
 
@@ -65,6 +65,6 @@ def test_with_rules_revalidates() -> None:
 def test_step_moves_one_level_toward_target() -> None:
     dyn = LogicDynamics(state_schema=SCHEMA, rules={"a": "2"}, default_rate=1.0)
     pop = SCHEMA.empty(4)
-    out = dyn.step(pop, Inputs(np.zeros((4, 0))), np.random.default_rng(0))
+    out = dyn.step(pop, Inputs(torch.zeros((4, 0))))
     assert out.get("a").tolist() == [1, 1, 1, 1]
     assert pop.get("a").tolist() == [0, 0, 0, 0]  # input not mutated

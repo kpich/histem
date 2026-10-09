@@ -44,7 +44,6 @@ def main() -> None:
         suite,
         RandomLogicEdit(seed=args.seed),
         args.iters,
-        seed=args.seed,
         verbose=True,
     )
     n_edits = len(log.accepted) - 1

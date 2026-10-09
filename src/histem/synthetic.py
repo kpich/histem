@@ -1,12 +1,12 @@
 """Toy ground truth: GATA1/PU1 fork, chromatin gates, MYC/mito loop, IL signal."""
 
-import anndata as ad
-import numpy as np
+import torch
 
-from histem.data import Dataset
+from histem.data import CountsDataset
 from histem.dynamics import CONTROL, Intervention
 from histem.models.logic import LogicDynamics
 from histem.observers import NBCountObserver
+from histem.rng import seeded
 from histem.simulator import Signaling
 from histem.state import Slot, StateSchema
 from histem.system import CellSystem
@@ -43,23 +43,28 @@ DRIVERS = (*TFS, "mito_cn")
 def make_observer(
     genes_per_driver: int = 4, housekeeping: int = 20, seed: int = 0
 ) -> NBCountObserver:
-    rng = np.random.default_rng(seed)
+    g = torch.Generator().manual_seed(seed)
+
+    def uniform(lo: float, hi: float, n: int = 1) -> torch.Tensor:
+        return lo + (hi - lo) * torch.rand(n, generator=g)
+
     genes, rows = [], []
     for j, d in enumerate(DRIVERS):
         for k in range(genes_per_driver):
             genes.append(f"{d}_t{k}")
-            w = np.zeros(len(DRIVERS))
-            w[j] = rng.uniform(1.5, 3.0)
-            if rng.random() < 0.3:
-                w[rng.integers(len(DRIVERS))] += rng.uniform(-1.0, 1.0)
+            w = torch.zeros(len(DRIVERS))
+            w[j] = uniform(1.5, 3.0)
+            if torch.rand(1, generator=g) < 0.3:
+                w[torch.randint(len(DRIVERS), (1,), generator=g)] += uniform(-1.0, 1.0)
             rows.append(w)
     for k in range(housekeeping):
         genes.append(f"HK{k}")
-        rows.append(np.zeros(len(DRIVERS)))
-    weights = np.array(rows)
-    bias = rng.uniform(-1.0, 1.5, len(genes))
+        rows.append(torch.zeros(len(DRIVERS)))
     return NBCountObserver(
-        genes=tuple(genes), drivers=DRIVERS, weights=weights, bias=bias
+        genes=tuple(genes),
+        drivers=DRIVERS,
+        weights=torch.stack(rows),
+        bias=uniform(-1.0, 1.5, len(genes)),
     )
 
 
@@ -86,12 +91,17 @@ def perturbations() -> dict[str, Intervention]:
 
 def make_dataset(
     system: CellSystem | None = None, cells_per_condition: int = 300, seed: int = 1
-) -> Dataset:
+) -> CountsDataset:
     system = system or make_system()
-    rng = np.random.default_rng(seed)
     interventions = perturbations()
-    parts = [
-        system.sample(cells_per_condition, rng, iv) for iv in interventions.values()
-    ]
-    adata = ad.concat(parts, index_unique="-")
-    return Dataset(name="synthetic_fork", adata=adata, interventions=interventions)
+    with torch.no_grad(), seeded(seed):
+        counts = {
+            name: system.sample(cells_per_condition, iv)
+            for name, iv in interventions.items()
+        }
+    return CountsDataset(
+        name="synthetic_fork",
+        features=system.observers["rna"].features,
+        counts=counts,
+        interventions=interventions,
+    )

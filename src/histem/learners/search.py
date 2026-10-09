@@ -4,7 +4,6 @@ import random
 from collections.abc import Callable
 from typing import Protocol
 
-import numpy as np
 from pydantic import Field, PrivateAttr
 
 from histem.models.logic import LogicDynamics
@@ -19,9 +18,7 @@ class Proposal(FrozenSpec):
 
 
 class Proposer(Protocol):
-    def propose(
-        self, system: CellSystem, scores: Scores, rng: np.random.Generator
-    ) -> Proposal: ...
+    def propose(self, system: CellSystem, scores: Scores) -> Proposal: ...
 
 
 class SearchLog(Spec):
@@ -35,15 +32,13 @@ def hill_climb(
     proposer: Proposer,
     iters: int,
     *,
-    seed: int = 0,
     verbose: bool = False,
 ) -> tuple[CellSystem, Scores, SearchLog]:
-    rng = np.random.default_rng(seed)
     best = suite.evaluate(system)
     log = SearchLog(accepted=[(0, best.objective, "init")])
     for it in range(1, iters + 1):
         try:
-            proposal = proposer.propose(system, best, rng)
+            proposal = proposer.propose(system, best)
             scores = suite.evaluate(proposal.system)
         except (KeyError, ValueError):
             continue
@@ -144,9 +139,7 @@ class RandomLogicEdit(Spec):
     def model_post_init(self, context: object) -> None:
         self._rng = random.Random(self.seed)
 
-    def propose(
-        self, system: CellSystem, scores: Scores, rng: np.random.Generator
-    ) -> Proposal:
+    def propose(self, system: CellSystem, scores: Scores) -> Proposal:
         dyn = system.dynamics
         if not isinstance(dyn, LogicDynamics):
             raise TypeError(f"RandomLogicEdit needs LogicDynamics, got {type(dyn)}")

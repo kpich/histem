@@ -1,8 +1,7 @@
+import math
 from typing import Protocol, Self, runtime_checkable
 
-import anndata as ad
-import numpy as np
-import pandas as pd
+import torch
 from pydantic import Field, model_validator
 
 from histem.spec import FrozenSpec
@@ -14,19 +13,26 @@ class Observer(Protocol):
     @property
     def modality(self) -> str: ...
 
-    def observe(self, pop: Population, rng: np.random.Generator) -> ad.AnnData: ...
+    @property
+    def features(self) -> tuple[str, ...]:
+        """Names of the observed columns, e.g. genes."""
+        ...
+
+    def observe(self, pop: Population) -> torch.Tensor:
+        """(n_cells, n_features)"""
+        ...
 
     def description_length(self) -> float: ...
 
 
-def state_features(pop: Population, variables: tuple[str, ...]) -> np.ndarray:
+def state_features(pop: Population, variables: tuple[str, ...]) -> torch.Tensor:
     """(n, k) features: discrete scaled to [0, 1], continuous passed through."""
     cols = []
     for v in variables:
         slot = pop.schema.slot(pop.schema.locate(v)[0])
-        x = pop.get(v).astype(np.float32)
+        x = pop.get(v).float()
         cols.append(x / (slot.levels - 1) if slot.kind == "discrete" else x)
-    return np.stack(cols, axis=1)
+    return torch.stack(cols, dim=1)
 
 
 class NBCountObserver(FrozenSpec):
@@ -34,8 +40,8 @@ class NBCountObserver(FrozenSpec):
 
     genes: tuple[str, ...] = Field(min_length=1)
     drivers: tuple[str, ...] = Field(min_length=1)
-    weights: np.ndarray  # (n_genes, n_drivers)
-    bias: np.ndarray  # (n_genes,)
+    weights: torch.Tensor  # (n_genes, n_drivers)
+    bias: torch.Tensor  # (n_genes,)
     dispersion: float = Field(5.0, gt=0)  # NB theta
     size_sd: float = Field(0.3, ge=0)  # sd of log library size
     modality: str = "rna"
@@ -43,29 +49,32 @@ class NBCountObserver(FrozenSpec):
     @model_validator(mode="after")
     def _check(self) -> Self:
         expected = (len(self.genes), len(self.drivers))
-        if self.weights.shape != expected:
-            raise ValueError(f"weights shape {self.weights.shape} != {expected}")
-        if self.bias.shape != (len(self.genes),):
-            raise ValueError(f"bias shape {self.bias.shape} != ({len(self.genes)},)")
+        if tuple(self.weights.shape) != expected:
+            raise ValueError(f"weights shape {tuple(self.weights.shape)} != {expected}")
+        if tuple(self.bias.shape) != (len(self.genes),):
+            raise ValueError(
+                f"bias shape {tuple(self.bias.shape)} != ({len(self.genes)},)"
+            )
         if len(set(self.genes)) != len(self.genes):
             raise ValueError("duplicate gene names")
         return self
 
-    def mean(self, pop: Population, rng: np.random.Generator) -> np.ndarray:
-        size = np.exp(rng.normal(0.0, self.size_sd, (pop.n, 1)))
-        log_mu = self.bias + state_features(pop, self.drivers) @ self.weights.T
-        mu: np.ndarray = size * np.exp(log_mu)
-        return mu
+    @property
+    def features(self) -> tuple[str, ...]:
+        return self.genes
 
-    def observe(self, pop: Population, rng: np.random.Generator) -> ad.AnnData:
-        mu = self.mean(pop, rng)
-        p = self.dispersion / (self.dispersion + mu)
-        counts = rng.negative_binomial(self.dispersion, p).astype(np.float32)
-        return ad.AnnData(
-            X=counts,
-            obs=pd.DataFrame(index=[f"cell{i}" for i in range(pop.n)]),
-            var=pd.DataFrame(index=list(self.genes)),
-        )
+    def log_mean(self, pop: Population) -> torch.Tensor:
+        log_size = self.size_sd * torch.randn((pop.n, 1), device=pop.device)
+        w, b = self.weights.to(pop.device), self.bias.to(pop.device)
+        return log_size + b + state_features(pop, self.drivers) @ w.T
+
+    def observe(self, pop: Population) -> torch.Tensor:
+        # torch's NB counts failures before total_count successes, so this
+        # parameterization has mean exp(log_mean) and inverse dispersion theta
+        logits = self.log_mean(pop) - math.log(self.dispersion)
+        nb = torch.distributions.NegativeBinomial(self.dispersion, logits=logits)
+        counts: torch.Tensor = nb.sample()
+        return counts
 
     def description_length(self) -> float:
-        return float(np.count_nonzero(self.weights) + self.bias.size) * 8.0
+        return float(torch.count_nonzero(self.weights) + self.bias.numel()) * 8.0

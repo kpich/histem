@@ -1,7 +1,5 @@
 import math
 
-import numpy as np
-
 from histem import synthetic
 from histem.learners.search import RandomLogicEdit, hill_climb
 from histem.models.logic import LogicDynamics
@@ -27,6 +25,5 @@ def test_generate_score_search_round_trip() -> None:
     reparsed = LogicDynamics.from_text(synthetic.SCHEMA, found.dynamics.to_text())
     assert reparsed.rules == found.dynamics.rules
 
-    adata = found.sample(5, np.random.default_rng(0))
-    assert adata.n_obs == 5
-    assert adata.var_names.equals(train.adata.var_names)
+    counts = found.sample(5)
+    assert counts.shape == (5, len(train.features))

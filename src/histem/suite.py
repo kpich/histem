@@ -1,14 +1,15 @@
 import numpy as np
+import torch
 from pydantic import Field
 
 from histem.data import Dataset
-from histem.metrics import population_distance
+from histem.rng import seeded
 from histem.spec import FrozenSpec, Spec
 from histem.system import CellSystem
 
 
 class Scores(FrozenSpec):
-    fit: dict[tuple[str, str], float]  # (dataset, condition) -> distance
+    fit: dict[tuple[str, str], float]  # (dataset, condition) -> loss
     description_length: float
     objective: float
 
@@ -21,6 +22,8 @@ class Scores(FrozenSpec):
 
 class Suite(Spec):
     datasets: list[Dataset] = Field(default_factory=list)
+    # dataset name -> weight in the objective; missing names weigh 1
+    weights: dict[str, float] = Field(default_factory=dict)
     complexity_weight: float = Field(1e-3, ge=0)
     cells_per_condition: int = Field(300, gt=0)
     # same seed for every candidate, so score differences aren't sampling noise
@@ -32,20 +35,24 @@ class Suite(Spec):
         self.datasets.append(dataset)
 
     def evaluate(self, system: CellSystem) -> Scores:
-        rng = np.random.default_rng(self.seed)
         fit = {}
-        for ds in self.datasets:
-            for cond in ds.conditions:
-                observed = ds.cells(cond)
-                sim = system.sample(
-                    self.cells_per_condition, rng, ds.interventions[cond], ds.modality
-                )
-                fit[(ds.name, cond)] = population_distance(observed, sim, rng=rng)
+        with torch.no_grad(), seeded(self.seed):
+            for ds in self.datasets:
+                for cond in ds.conditions:
+                    loss = ds.loss(system, cond, self.cells_per_condition)
+                    fit[(ds.name, cond)] = float(loss)
         if not fit:
             raise ValueError("suite has no (dataset, condition) pairs to score")
+        scores = Scores(fit=fit, description_length=0.0, objective=0.0)
+        per_ds = scores.by_dataset()
+        w = {k: self.weights.get(k, 1.0) for k in per_ds}
+        fit_term = sum(w[k] * v for k, v in per_ds.items()) / sum(w.values())
         dl = system.description_length()
-        objective = float(np.mean(list(fit.values()))) + self.complexity_weight * dl
-        return Scores(fit=fit, description_length=dl, objective=objective)
+        return Scores(
+            fit=fit,
+            description_length=dl,
+            objective=fit_term + self.complexity_weight * dl,
+        )
 
     @staticmethod
     def regressions(
