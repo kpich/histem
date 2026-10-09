@@ -4,7 +4,7 @@ import torch
 from pydantic import Field, model_validator
 
 from histem.dynamics import CONTROL, Dynamics, Inputs, Intervention
-from histem.spec import FrozenSpec
+from histem.spec import FrozenSpec, Tensor
 from histem.state import Population
 
 
@@ -12,7 +12,7 @@ class Signaling(FrozenSpec):
     autocrine: float = Field(1.0, ge=0)
     paracrine: float = Field(1.0, ge=0)
     endocrine: float = Field(0.0, ge=0)
-    neighbors: torch.Tensor | None = None  # (2, n_edges) of (receiver, sender)
+    neighbors: Tensor | None = None  # (2, n_edges) of (receiver, sender)
 
     @model_validator(mode="after")
     def _check(self) -> Self:

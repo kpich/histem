@@ -8,7 +8,7 @@ from pydantic import model_validator
 
 from histem.dynamics import Intervention
 from histem.metrics import energy_distance, log_normalize
-from histem.spec import FrozenSpec
+from histem.spec import FrozenSpec, Tensor
 from histem.system import CellSystem
 
 # ../data next to the repo
@@ -38,9 +38,9 @@ class CountsDataset(FrozenSpec):
 
     name: str
     features: tuple[str, ...]
-    counts: dict[str, torch.Tensor]  # condition -> (n_cells, n_features)
+    counts: dict[str, Tensor]  # condition -> (n_cells, n_features)
     # condition -> (n_cells,) library size; defaults to the row sums of `counts`
-    totals: dict[str, torch.Tensor] | None = None
+    totals: dict[str, Tensor] | None = None
     interventions: dict[str, Intervention]
     modality: str = "rna"
 

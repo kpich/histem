@@ -72,7 +72,6 @@ def make_system(program: str = PROGRAM) -> CellSystem:
     return CellSystem(
         dynamics=LogicDynamics.from_text(SCHEMA, program),
         observers={"rna": make_observer()},
-        init=SCHEMA.uniform,
         burn_in=60,
         signaling=Signaling(autocrine=0.5, endocrine=0.5),
     )
