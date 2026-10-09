@@ -4,7 +4,7 @@ from typing import Protocol, Self, runtime_checkable
 import torch
 from pydantic import Field, model_validator
 
-from histem.spec import FrozenSpec
+from histem.spec import FrozenSpec, Tensor
 from histem.state import Population
 
 
@@ -40,8 +40,8 @@ class NBCountObserver(FrozenSpec):
 
     genes: tuple[str, ...] = Field(min_length=1)
     drivers: tuple[str, ...] = Field(min_length=1)
-    weights: torch.Tensor  # (n_genes, n_drivers)
-    bias: torch.Tensor  # (n_genes,)
+    weights: Tensor  # (n_genes, n_drivers)
+    bias: Tensor  # (n_genes,)
     dispersion: float = Field(5.0, gt=0)  # NB theta
     size_sd: float = Field(0.3, ge=0)  # sd of log library size
     modality: str = "rna"

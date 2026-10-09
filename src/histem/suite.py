@@ -4,7 +4,7 @@ from pydantic import Field
 
 from histem.data import Dataset
 from histem.rng import seeded
-from histem.spec import FrozenSpec, Spec
+from histem.spec import FrozenSpec, Spec, Tagged
 from histem.system import CellSystem
 
 
@@ -21,7 +21,7 @@ class Scores(FrozenSpec):
 
 
 class Suite(Spec):
-    datasets: list[Dataset] = Field(default_factory=list)
+    datasets: list[Tagged[Dataset]] = Field(default_factory=list)
     # dataset name -> weight in the objective; missing names weigh 1
     weights: dict[str, float] = Field(default_factory=dict)
     complexity_weight: float = Field(1e-3, ge=0)
