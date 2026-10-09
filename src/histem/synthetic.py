@@ -5,6 +5,7 @@ import torch
 from histem.data import CountsDataset
 from histem.dynamics import CONTROL, Intervention
 from histem.models.logic import LogicDynamics
+from histem.models.neural import NeuralDynamics
 from histem.observers import NBCountObserver
 from histem.rng import seeded
 from histem.simulator import Signaling
@@ -75,6 +76,31 @@ def make_system(program: str = PROGRAM) -> CellSystem:
         burn_in=60,
         signaling=Signaling(autocrine=0.5, endocrine=0.5),
     )
+
+
+# continuous drivers in level units (so clamps mean the same thing) plus latents
+NEURAL_SCHEMA = StateSchema(
+    slots=(
+        Slot(name="drivers", variables=DRIVERS, kind="continuous"),
+        Slot(
+            name="latent", variables=tuple(f"h{i}" for i in range(4)), kind="continuous"
+        ),
+    )
+)
+
+
+def make_neural_system(hidden: int = 64, device: str = "cpu") -> CellSystem:
+    """Learnable dynamics under the true observer, rescaled from [0, 1] features to
+    level units."""
+    obs = make_observer()
+    return CellSystem(
+        dynamics=NeuralDynamics(
+            state_schema=NEURAL_SCHEMA, signals=("IL",), hidden=hidden
+        ),
+        observers={"rna": obs.model_copy(update={"weights": obs.weights / 2})},
+        burn_in=30,
+        signaling=Signaling(autocrine=0.5, endocrine=0.5),
+    ).to(device)
 
 
 def perturbations() -> dict[str, Intervention]:
