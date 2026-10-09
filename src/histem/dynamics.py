@@ -17,7 +17,11 @@ class Intervention(FrozenSpec):
     def apply(self, pop: Population) -> None:
         for variable, value in self.clamps:
             slot, i = pop.schema.locate(variable)
-            pop.values[slot][:, i] = value
+            x = pop.values[slot]
+            # out-of-place, so it is safe inside an autograd graph
+            pop.values[slot] = x.index_fill(
+                1, torch.tensor([i], device=x.device), value
+            )
 
 
 CONTROL = Intervention()

@@ -22,6 +22,10 @@ class Observer(Protocol):
         """(n_cells, n_features)"""
         ...
 
+    def rsample(self, pop: Population) -> torch.Tensor:
+        """A reparameterized stand-in for `observe`, for gradient training."""
+        ...
+
     def description_length(self) -> float: ...
 
 
@@ -75,6 +79,14 @@ class NBCountObserver(FrozenSpec):
         nb = torch.distributions.NegativeBinomial(self.dispersion, logits=logits)
         counts: torch.Tensor = nb.sample()
         return counts
+
+    def rsample(self, pop: Population) -> torch.Tensor:
+        # NB = Poisson(Gamma): the gamma rate is reparameterized, the Poisson step
+        # is replaced by a moment-matched normal
+        mean = self.log_mean(pop).exp()
+        theta = torch.tensor(self.dispersion, device=mean.device)
+        rate = torch.distributions.Gamma(theta, theta / mean).rsample()
+        return (rate + rate.sqrt() * torch.randn_like(rate)).clamp(min=0)
 
     def description_length(self) -> float:
         return float(torch.count_nonzero(self.weights) + self.bias.numel()) * 8.0

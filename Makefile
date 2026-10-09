@@ -1,4 +1,4 @@
-.PHONY: install install-precommit-hooks check lint format typecheck test int-test recovery
+.PHONY: install install-precommit-hooks check lint format typecheck test int-test recovery gradient
 
 install:
 	uv sync
@@ -29,3 +29,8 @@ ITERS ?= 300
 
 recovery:
 	uv run scripts/synthetic_recovery.py --iters $(ITERS)
+
+STEPS ?= 300
+
+gradient:
+	uv run scripts/synthetic_gradient.py --steps $(STEPS)

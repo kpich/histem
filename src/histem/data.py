@@ -116,7 +116,12 @@ class CountsDataset(FrozenSpec):
         if obs.shape[0] > n:
             idx = torch.randperm(obs.shape[0])[:n]
             obs, tot = obs[idx], tot[idx]
-        sim = system.sample(n, self.interventions[condition], self.modality)
+        sim = system.sample(
+            n,
+            self.interventions[condition],
+            self.modality,
+            reparam=torch.is_grad_enabled(),
+        )
         x = log_normalize(obs[:, mine], tot).to(sim.device)
         y = log_normalize(sim[:, theirs], sim.sum(dim=1))
         return energy_distance(x, y)

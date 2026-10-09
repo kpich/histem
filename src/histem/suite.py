@@ -34,6 +34,20 @@ class Suite(Spec):
             raise ValueError(f"dataset {dataset.name!r} already in suite")
         self.datasets.append(dataset)
 
+    def loss(self, system: CellSystem) -> torch.Tensor:
+        """Differentiable fit term of the objective, on fresh samples."""
+        if not self.datasets:
+            raise ValueError("suite has no datasets")
+        per_ds = {
+            ds.name: torch.stack(
+                [ds.loss(system, c, self.cells_per_condition) for c in ds.conditions]
+            ).mean()
+            for ds in self.datasets
+        }
+        w = {k: self.weights.get(k, 1.0) for k in per_ds}
+        total = torch.stack([w[k] * v for k, v in per_ds.items()]).sum()
+        return total / sum(w.values())
+
     def evaluate(self, system: CellSystem) -> Scores:
         fit = {}
         with torch.no_grad(), seeded(self.seed):
