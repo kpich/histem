@@ -13,7 +13,8 @@ class Slot(FrozenSpec):
     name: str
     variables: tuple[str, ...] = Field(min_length=1)
     kind: SlotKind = "discrete"
-    levels: int = 2  # discrete values are 0..levels-1
+    # discrete values are 0..levels-1; continuous ones are a relaxation on that scale
+    levels: int = 2
     observed: bool = False
 
     @model_validator(mode="after")
@@ -66,6 +67,12 @@ class StateSchema(FrozenSpec):
     def variables(self) -> list[str]:
         return [v for s in self.slots for v in s.variables]
 
+    def relaxed(self) -> "StateSchema":
+        """Every slot continuous, on the same scale."""
+        return StateSchema(
+            slots=tuple(s.model_copy(update={"kind": "continuous"}) for s in self.slots)
+        )
+
     def empty(self, n: int, device: torch.device | str = "cpu") -> "Population":
         return Population(
             self,
@@ -76,16 +83,16 @@ class StateSchema(FrozenSpec):
         )
 
     def uniform(self, n: int, device: torch.device | str = "cpu") -> "Population":
-        """Discrete slots uniform over levels, continuous slots standard normal."""
-        values = {}
-        for s in self.slots:
-            if s.kind == "discrete":
-                values[s.name] = torch.randint(
-                    0, s.levels, (n, s.dim), dtype=s.dtype, device=device
+        """Every slot uniform over its integer levels."""
+        return Population(
+            self,
+            {
+                s.name: torch.randint(0, s.levels, (n, s.dim), device=device).to(
+                    s.dtype
                 )
-            else:
-                values[s.name] = torch.randn((n, s.dim), device=device)
-        return Population(self, values)
+                for s in self.slots
+            },
+        )
 
 
 @dataclass
@@ -112,6 +119,18 @@ class Population:
             for s in self.schema.slots
             for i, v in enumerate(s.variables)
         }
+
+    def flat(self) -> torch.Tensor:
+        """(n, n_variables) float, in schema order."""
+        return torch.cat([self.values[s.name].float() for s in self.schema.slots], 1)
+
+    def with_flat(self, x: torch.Tensor) -> "Population":
+        dims = [s.dim for s in self.schema.slots]
+        values = {
+            s.name: part.to(s.dtype)
+            for s, part in zip(self.schema.slots, x.split(dims, dim=1), strict=True)
+        }
+        return Population(self.schema, values, self.positions, dict(self.meta))
 
     @property
     def device(self) -> torch.device:

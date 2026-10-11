@@ -1,4 +1,4 @@
-.PHONY: install install-precommit-hooks check lint format typecheck test int-test recovery gradient
+.PHONY: install install-precommit-hooks check lint format typecheck test int-test emulate
 
 install:
 	uv sync
@@ -25,12 +25,5 @@ test:
 int-test:
 	uv run pytest tests
 
-ITERS ?= 300
-
-recovery:
-	uv run scripts/synthetic_recovery.py --iters $(ITERS)
-
-STEPS ?= 300
-
-gradient:
-	uv run scripts/synthetic_gradient.py --steps $(STEPS)
+emulate:
+	uv run scripts/synthetic_emulate.py
