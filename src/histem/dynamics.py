@@ -8,21 +8,10 @@ from histem.state import Population, StateSchema
 
 
 class Intervention(FrozenSpec):
-    """`clamps` are re-applied after every step. `genes` are perturbation targets,
-    which a dynamics model reads as an input."""
+    """`genes` are perturbation targets, which a dynamics model reads as an input."""
 
     name: str = "control"
-    clamps: tuple[tuple[str, float], ...] = ()
     genes: tuple[str, ...] = ()
-
-    def apply(self, pop: Population) -> None:
-        for variable, value in self.clamps:
-            slot, i = pop.schema.locate(variable)
-            x = pop.values[slot]
-            # out-of-place, so it is safe inside an autograd graph
-            pop.values[slot] = x.index_fill(
-                1, torch.tensor([i], device=x.device), value
-            )
 
 
 CONTROL = Intervention()

@@ -1,25 +1,20 @@
 from dataclasses import dataclass
-from typing import Literal, Self
+from typing import Self
 
 import torch
 from pydantic import Field, model_validator
 
 from histem.spec import FrozenSpec
 
-SlotKind = Literal["discrete", "continuous"]
-
 
 class Slot(FrozenSpec):
     name: str
     variables: tuple[str, ...] = Field(min_length=1)
-    kind: SlotKind = "discrete"
-    # discrete values are 0..levels-1; continuous ones are a relaxation on that scale
-    levels: int = 2
+    # values live on the grid 0..levels-1
+    levels: int = Field(2, ge=2)
 
     @model_validator(mode="after")
     def _check(self) -> Self:
-        if self.kind == "discrete" and not 2 <= self.levels <= 127:  # stored as int8
-            raise ValueError(f"slot {self.name!r}: levels must be in [2, 127]")
         if len(set(self.variables)) != len(self.variables):
             raise ValueError(f"slot {self.name!r}: duplicate variable names")
         return self
@@ -27,10 +22,6 @@ class Slot(FrozenSpec):
     @property
     def dim(self) -> int:
         return len(self.variables)
-
-    @property
-    def dtype(self) -> torch.dtype:
-        return torch.int8 if self.kind == "discrete" else torch.float32
 
 
 class StateSchema(FrozenSpec):
@@ -66,19 +57,10 @@ class StateSchema(FrozenSpec):
     def variables(self) -> list[str]:
         return [v for s in self.slots for v in s.variables]
 
-    def relaxed(self) -> "StateSchema":
-        """Every slot continuous, on the same scale."""
-        return StateSchema(
-            slots=tuple(s.model_copy(update={"kind": "continuous"}) for s in self.slots)
-        )
-
     def empty(self, n: int, device: torch.device | str = "cpu") -> "Population":
         return Population(
             self,
-            {
-                s.name: torch.zeros((n, s.dim), dtype=s.dtype, device=device)
-                for s in self.slots
-            },
+            {s.name: torch.zeros((n, s.dim), device=device) for s in self.slots},
         )
 
     def uniform(self, n: int, device: torch.device | str = "cpu") -> "Population":
@@ -86,20 +68,16 @@ class StateSchema(FrozenSpec):
         return Population(
             self,
             {
-                s.name: torch.randint(0, s.levels, (n, s.dim), device=device).to(
-                    s.dtype
-                )
+                s.name: torch.randint(0, s.levels, (n, s.dim), device=device).float()
                 for s in self.slots
             },
         )
 
 
 def latent_schema(k: int, levels: int) -> StateSchema:
-    """k unnamed continuous variables z0..z{k-1}, in one slot."""
+    """k unnamed variables z0..z{k-1}, in one slot."""
     variables = tuple(f"z{i}" for i in range(k))
-    return StateSchema(
-        slots=(Slot(name="z", variables=variables, kind="continuous", levels=levels),)
-    )
+    return StateSchema(slots=(Slot(name="z", variables=variables, levels=levels),))
 
 
 @dataclass
@@ -118,13 +96,13 @@ class Population:
         return self.values[slot][:, i]
 
     def flat(self) -> torch.Tensor:
-        """(n, n_variables) float, in schema order."""
-        return torch.cat([self.values[s.name].float() for s in self.schema.slots], 1)
+        """(n, n_variables), in schema order."""
+        return torch.cat([self.values[s.name] for s in self.schema.slots], 1)
 
     def with_flat(self, x: torch.Tensor) -> "Population":
         dims = [s.dim for s in self.schema.slots]
         values = {
-            s.name: part.to(s.dtype)
+            s.name: part
             for s, part in zip(self.schema.slots, x.split(dims, dim=1), strict=True)
         }
         return Population(self.schema, values)

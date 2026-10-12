@@ -58,10 +58,7 @@ def simulate(
     signaling: Signaling | None = None,
 ) -> Population:
     signaling = signaling or Signaling()
-    pop = pop.copy()
-    intervention.apply(pop)
     for _ in range(steps):
         received = signaling.route(dynamics.emit_signals(pop))
         pop = dynamics.step(pop, Inputs(received, intervention))
-        intervention.apply(pop)
     return pop

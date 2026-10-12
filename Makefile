@@ -1,4 +1,4 @@
-.PHONY: install install-precommit-hooks check lint format typecheck test int-test fit norman tb
+.PHONY: install install-precommit-hooks check lint format typecheck test int-test norman tb
 
 install:
 	uv sync
@@ -24,9 +24,6 @@ test:
 
 int-test:
 	uv run pytest tests
-
-fit:
-	uv run scripts/synthetic_fit.py
 
 norman:
 	uv run scripts/norman_fit.py

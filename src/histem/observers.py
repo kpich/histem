@@ -34,50 +34,8 @@ def state_features(pop: Population, variables: tuple[str, ...]) -> torch.Tensor:
     cols = []
     for v in variables:
         slot = pop.schema.slot(pop.schema.locate(v)[0])
-        cols.append(pop.get(v).float() / (slot.levels - 1))
+        cols.append(pop.get(v) / (slot.levels - 1))
     return torch.stack(cols, dim=1)
-
-
-class NBCountObserver(FrozenSpec):
-    """log mean_g = log(size) + bias_g + weights_g . features(state)"""
-
-    genes: tuple[str, ...] = Field(min_length=1)
-    drivers: tuple[str, ...] = Field(min_length=1)
-    weights: Tensor  # (n_genes, n_drivers)
-    bias: Tensor  # (n_genes,)
-    dispersion: float = Field(5.0, gt=0)  # NB theta
-    size_sd: float = Field(0.3, ge=0)  # sd of log library size
-    modality: str = "rna"
-
-    @model_validator(mode="after")
-    def _check(self) -> Self:
-        expected = (len(self.genes), len(self.drivers))
-        if tuple(self.weights.shape) != expected:
-            raise ValueError(f"weights shape {tuple(self.weights.shape)} != {expected}")
-        if tuple(self.bias.shape) != (len(self.genes),):
-            raise ValueError(
-                f"bias shape {tuple(self.bias.shape)} != ({len(self.genes)},)"
-            )
-        if len(set(self.genes)) != len(self.genes):
-            raise ValueError("duplicate gene names")
-        return self
-
-    @property
-    def features(self) -> tuple[str, ...]:
-        return self.genes
-
-    def log_mean(self, pop: Population) -> torch.Tensor:
-        log_size = self.size_sd * torch.randn((pop.n, 1), device=pop.device)
-        w, b = self.weights.to(pop.device), self.bias.to(pop.device)
-        return log_size + b + state_features(pop, self.drivers) @ w.T
-
-    def observe(self, pop: Population) -> torch.Tensor:
-        theta = torch.tensor(self.dispersion, device=pop.device)
-        return _nb_sample(self.log_mean(pop), theta)
-
-    def rsample(self, pop: Population) -> torch.Tensor:
-        theta = torch.tensor(self.dispersion, device=pop.device)
-        return _nb_rsample(self.log_mean(pop), theta)
 
 
 class _Decoder(nn.Module):

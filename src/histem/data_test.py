@@ -5,9 +5,9 @@ import pytest
 import torch
 from pydantic import ValidationError
 
-from histem import synthetic
 from histem.data import CountsDataset, Dataset, combo_split, from_anndata
 from histem.dynamics import CONTROL, Intervention
+from histem.system import CellSystem
 
 IVS = {"control": CONTROL, "ko": Intervention(name="ko")}
 
@@ -71,9 +71,9 @@ def test_split_by_condition() -> None:
         ds.split(["missing"])
 
 
-def test_loss_is_finite_scalar_on_a_batch() -> None:
-    system = synthetic.make_system().model_copy(update={"burn_in": 2})
-    ds = synthetic.make_dataset(system, cells_per_condition=20)
+def test_loss_is_finite_scalar_on_a_batch(
+    ds: CountsDataset, system: CellSystem
+) -> None:
     loss = ds.loss(system, "control", 8)
     assert loss.ndim == 0
     assert torch.isfinite(loss)

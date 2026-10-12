@@ -14,10 +14,9 @@ def test_duplicate_variable_names_rejected() -> None:
         )
 
 
-@pytest.mark.parametrize("levels", [1, 128])
-def test_discrete_levels_bounded(levels: int) -> None:
+def test_levels_at_least_two() -> None:
     with pytest.raises(ValidationError, match="levels"):
-        Slot(name="a", variables=("x",), levels=levels)
+        Slot(name="a", variables=("x",), levels=1)
 
 
 def test_empty_slot_rejected() -> None:

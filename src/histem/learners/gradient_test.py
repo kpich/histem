@@ -1,31 +1,17 @@
-import pytest
 import torch
 
-from histem import synthetic
+from histem.data import CountsDataset
 from histem.learners.gradient import gradient_fit
 from histem.suite import Suite
+from histem.system import CellSystem
 
 
-def _suite() -> Suite:
-    ds = synthetic.make_dataset(synthetic.make_system(), cells_per_condition=10)
-    _, control = ds.split(["control"])
-    return Suite(datasets=[control], cells_per_condition=10)
-
-
-def test_updates_parameters_in_place() -> None:
-    torch.manual_seed(0)
-    system = synthetic.make_kernel_system(width=16, layers=1).model_copy(
-        update={"burn_in": 2}
-    )
+def test_updates_parameters_in_place(ds: CountsDataset, system: CellSystem) -> None:
     before = [p.detach().clone() for p in system.parameters()]
     seen: list[int] = []
-    losses = gradient_fit(system, _suite(), 2, callback=lambda it, *_: seen.append(it))
+    suite = Suite(datasets=[ds], cells_per_condition=8)
+    losses = gradient_fit(system, suite, 2, callback=lambda it, *_: seen.append(it))
     assert len(losses) == 2
     assert seen == [1, 2]
     after = list(system.parameters())
     assert any(not torch.equal(a, b) for a, b in zip(before, after, strict=True))
-
-
-def test_rejects_systems_without_parameters() -> None:
-    with pytest.raises(ValueError, match="no learnable"):
-        gradient_fit(synthetic.make_system(), _suite(), 1)

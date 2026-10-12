@@ -19,11 +19,11 @@ class Relay(FrozenSpec):
 
     def step(self, pop: Population, inputs: Inputs) -> Population:
         out = pop.copy()
-        out.values["s"][:, 1] = (inputs.signals[:, 0] >= 0.5).to(torch.int8)
+        out.values["s"][:, 1] = (inputs.signals[:, 0] >= 0.5).float()
         return out
 
     def emit_signals(self, pop: Population) -> torch.Tensor:
-        return pop.get("src").float().unsqueeze(1)
+        return pop.get("src").unsqueeze(1)
 
 
 def test_paracrine_signal_reaches_neighbors() -> None:
