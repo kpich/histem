@@ -17,7 +17,7 @@ import torch
 from pydantic import Field, PrivateAttr, model_validator
 from torch import nn
 
-from histem.dynamics import Inputs, Intervention, Transitions
+from histem.dynamics import Inputs, Intervention
 from histem.spec import FrozenSpec, Tensor
 from histem.state import Population, StateSchema
 
@@ -134,28 +134,6 @@ class DiffusionKernel(FrozenSpec):
         if self._net.emit is None:
             return torch.zeros((pop.n, 0), device=pop.device)
         return nn.functional.softplus(self._net.emit(pop.flat()))
-
-    def transition_loss(self, batch: Transitions) -> torch.Tensor:
-        """Cross-entropy on randomly masked next levels, plus regression of the
-        emitted signals."""
-        n, v = batch.x.shape
-        target = batch.next.round().long()
-        rate = torch.rand(n, 1, device=batch.x.device)
-        masked = torch.rand(n, v, device=batch.x.device) < rate
-        masked[torch.arange(n), torch.randint(0, v, (n,))] = True
-        onehot = nn.functional.one_hot(target, self.levels + 1).float()
-        mask = nn.functional.one_hot(
-            torch.full_like(target, self.levels), self.levels + 1
-        ).float()
-        partial = torch.where(masked.unsqueeze(-1), mask, onehot)
-        logits = self._logits(partial, batch.x, batch.received)
-        ce = nn.functional.cross_entropy(
-            logits[masked], target[masked], reduction="mean"
-        )
-        if self._net.emit is None:
-            return ce
-        emitted = nn.functional.softplus(self._net.emit(batch.x))
-        return ce + nn.functional.mse_loss(emitted, batch.emitted)
 
     def intervene(self, intervention: Intervention) -> Self:
         return self

@@ -27,12 +27,8 @@ SCHEMA = StateSchema(
 class ForkProgram(FrozenSpec):
     """Asynchronous multi-valued logic. Each step, each variable fires with
     probability `rates` and moves one level toward its target.
-
-    The flags switch off mechanisms, to make wrong drafts of the truth.
     """
 
-    pu1_represses_gata1: bool = True
-    il_opens_cebpa: bool = True
     rates: dict[str, float] = Field(
         default_factory=lambda: {"acc_GATA1": 0.05, "acc_CEBPA": 0.05, "mito_cn": 0.1}
     )
@@ -49,14 +45,10 @@ class ForkProgram(FrozenSpec):
     def targets(
         self, v: dict[str, torch.Tensor], il: torch.Tensor
     ) -> dict[str, torch.Tensor]:
-        gata1 = (v["acc_GATA1"] >= 1) & ((v["GATA1"] >= 1) | (v["FLI1"] >= 1))
-        if self.pu1_represses_gata1:
-            gata1 &= v["PU1"] < 2
-        acc_cebpa = v["acc_CEBPA"] >= 1
-        if self.il_opens_cebpa:
-            acc_cebpa |= il >= 0.5
         on = {
-            "GATA1": gata1,
+            "GATA1": (v["acc_GATA1"] >= 1)
+            & ((v["GATA1"] >= 1) | (v["FLI1"] >= 1))
+            & (v["PU1"] < 2),
             "PU1": ((v["PU1"] >= 1) | (v["CEBPA"] >= 1)) & (v["GATA1"] < 2),
             "FLI1": (v["GATA1"] >= 1) & (v["KLF1"] < 1),
             "KLF1": (v["GATA1"] >= 2) & (v["FLI1"] < 2),
@@ -67,7 +59,7 @@ class ForkProgram(FrozenSpec):
         out["MYC"] = 1.0 + myc_high.float()
         out["mito_cn"] = 1.0 + (v["MYC"] >= 2).float()
         out["acc_GATA1"] = (v["CEBPA"] < 2).float()
-        out["acc_CEBPA"] = acc_cebpa.float()
+        out["acc_CEBPA"] = ((v["acc_CEBPA"] >= 1) | (il >= 0.5)).float()
         return out
 
     def step(self, pop: Population, inputs: Inputs) -> Population:
@@ -91,9 +83,6 @@ class ForkProgram(FrozenSpec):
     def description_length(self) -> float:
         return 0.0
 
-
-# the truth without PU1 -| GATA1 and without IL opening CEBPA chromatin
-DRAFT = ForkProgram(pu1_represses_gata1=False, il_opens_cebpa=False)
 
 DRIVERS = (*TFS, "mito_cn")
 
@@ -135,7 +124,7 @@ def make_system(program: ForkProgram | None = None) -> CellSystem:
     )
 
 
-def make_emulator_system(
+def make_kernel_system(
     width: int = 64,
     layers: int = 2,
     rounds: int = 3,

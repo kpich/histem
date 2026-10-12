@@ -33,24 +33,6 @@ class Inputs:
     intervention: Intervention = field(default=CONTROL)
 
 
-@dataclass
-class Transitions:
-    """Recorded steps of some dynamics, flattened in schema order."""
-
-    x: torch.Tensor  # (n, n_variables) before the step
-    received: torch.Tensor  # (n, n_signals)
-    emitted: torch.Tensor  # (n, n_signals) by x
-    next: torch.Tensor  # (n, n_variables) after the step, before clamps
-
-    def __len__(self) -> int:
-        return int(self.x.shape[0])
-
-    def batch(self, idx: torch.Tensor) -> "Transitions":
-        return Transitions(
-            self.x[idx], self.received[idx], self.emitted[idx], self.next[idx]
-        )
-
-
 @runtime_checkable
 class Dynamics(Protocol):
     """Shared rules: a stochastic transition kernel over per-cell state."""

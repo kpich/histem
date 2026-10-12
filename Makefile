@@ -1,4 +1,4 @@
-.PHONY: install install-precommit-hooks check lint format typecheck test int-test emulate
+.PHONY: install install-precommit-hooks check lint format typecheck test int-test fit
 
 install:
 	uv sync
@@ -25,5 +25,5 @@ test:
 int-test:
 	uv run pytest tests
 
-emulate:
-	uv run scripts/synthetic_emulate.py
+fit:
+	uv run scripts/synthetic_fit.py
