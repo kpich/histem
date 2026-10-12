@@ -8,10 +8,12 @@ from histem.state import Population, StateSchema
 
 
 class Intervention(FrozenSpec):
-    """`clamps` are re-applied after every step; `tags` are for `Dynamics.intervene`."""
+    """`clamps` are re-applied after every step; `tags` are for `Dynamics.intervene`.
+    `genes` are perturbation targets, which a dynamics model reads as an input."""
 
     name: str = "control"
     clamps: tuple[tuple[str, float], ...] = ()
+    genes: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
 
     def apply(self, pop: Population) -> None:
@@ -53,8 +55,4 @@ class Dynamics(Protocol):
 
     def intervene(self, intervention: Intervention) -> "Dynamics":
         """Effects beyond clamps (which the simulator applies). Usually `self`."""
-        ...
-
-    def description_length(self) -> float:
-        """Complexity in bits, or a consistent proxy."""
         ...

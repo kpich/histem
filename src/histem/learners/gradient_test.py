@@ -18,8 +18,10 @@ def test_updates_parameters_in_place() -> None:
         update={"burn_in": 2}
     )
     before = [p.detach().clone() for p in system.parameters()]
-    log = gradient_fit(system, _suite(), 2)
+    seen: list[int] = []
+    log = gradient_fit(system, _suite(), 2, callback=lambda it, *_: seen.append(it))
     assert len(log.losses) == 2
+    assert seen == [1, 2]
     after = list(system.parameters())
     assert any(not torch.equal(a, b) for a, b in zip(before, after, strict=True))
 
