@@ -36,6 +36,7 @@ def _args() -> argparse.Namespace:
     ap.add_argument("--levels", type=int, default=8)
     ap.add_argument("--width", type=int, default=64)
     ap.add_argument("--layers", type=int, default=2)
+    ap.add_argument("--gene-dim", type=int, default=128)
     ap.add_argument("--burn-in", type=int, default=20)
     ap.add_argument("--grad-steps", type=int, default=10)
     ap.add_argument("--device", default="mps")
@@ -44,8 +45,9 @@ def _args() -> argparse.Namespace:
 
 
 class Evaluator:
-    """Energy distance and mean-shift correlation on watched train conditions and
-    held-out doubles, logged with the baselines' at every call."""
+    """Energy distance, mean-shift correlation and the shift of the perturbed genes
+    themselves, on watched train conditions and held-out doubles, logged with the
+    baselines' at every call."""
 
     def __init__(
         self,
@@ -66,7 +68,8 @@ class Evaluator:
             self.additive_ed = {
                 c: float(baselines.additive(ds, c, self.n)) for c in held_out
             }
-        self.real_shift = {c: _shift(ds, c) for c in held_out}
+        self.perturbed = watched[1:] + held_out
+        self.real_shift = {c: _shift(ds, c) for c in self.perturbed}
         self.additive_shift = {c: baselines.additive_shift(ds, c) for c in held_out}
 
     def __call__(self, system: CellSystem, step: int) -> None:
@@ -78,7 +81,11 @@ class Evaluator:
                 reals[c] = ds.normalized(c, n)
                 ed[c] = float(energy_distance(reals[c], sims[c]))
         control_mean = sims["control"].mean(dim=0)
-        model_shift = {c: sims[c].mean(dim=0) - control_mean for c in held}
+        model_shift = {c: sims[c].mean(dim=0) - control_mean for c in self.perturbed}
+        train = self.watched[1:]
+        r = _r(model_shift, self.real_shift)
+        model_target = _target_shift(ds, model_shift)
+        real_target = _target_shift(ds, self.real_shift)
 
         self.log.scalars(
             "energy/held_out",
@@ -100,11 +107,22 @@ class Evaluator:
         self.log.scalars(
             "shift_r/held_out",
             {
-                "model": _mean(_r(model_shift, self.real_shift), held),
+                "model": _mean(r, held),
                 "additive": _mean(_r(self.additive_shift, self.real_shift), held),
             },
             step,
         )
+        self.log.scalar("shift_r/train", _mean(r, train), step)
+        for split, conds in [("held_out", held), ("train", train)]:
+            measured = [c for c in conds if c in real_target]
+            self.log.scalars(
+                f"target_shift/{split}",
+                {
+                    "model": _mean(model_target, measured),
+                    "real": _mean(real_target, measured),
+                },
+                step,
+            )
         bars = {
             c: {
                 "model": ed[c],
@@ -156,6 +174,7 @@ def main() -> None:
         levels=args.levels,
         width=args.width,
         layers=args.layers,
+        gene_dim=args.gene_dim,
         burn_in=args.burn_in,
         grad_steps=args.grad_steps,
         device=args.device,
@@ -169,10 +188,11 @@ def main() -> None:
 
     last = time.perf_counter()
 
-    def on_step(step: int, loss: float, grad_norm: float) -> None:
+    def on_step(step: int, loss: float, grad_norms: dict[str, float]) -> None:
         nonlocal last
         log.scalar("train/loss", loss, step)
-        log.scalar("train/grad_norm", grad_norm, step)
+        log.scalar("train/grad_norm", grad_norms["total"], step)
+        log.scalars("grad_norm", _group_norms(grad_norms), step)
         log.scalar("train/sec_per_step", time.perf_counter() - last, step)
         if step % args.eval_every == 0 or step == args.steps:
             evaluate(system, step)
@@ -187,6 +207,35 @@ def main() -> None:
 
 def _mean(d: dict[str, float], conditions: list[str]) -> float:
     return sum(d[c] for c in conditions) / len(conditions)
+
+
+def _group_norms(norms: dict[str, float]) -> dict[str, float]:
+    """Pre-clip grad norms of the kernel, decoder, dispersion and gene table."""
+    squares: dict[str, float] = {}
+    for name, v in norms.items():
+        if name == "total":
+            continue
+        if name.endswith("log_dispersion"):
+            group = "dispersion"
+        else:
+            group = {"dynamics": "kernel", "observers": "decoder"}.get(
+                name.split("/")[0], name.split("/")[0]
+            )
+        squares[group] = squares.get(group, 0.0) + v**2
+    return {k: v**0.5 for k, v in squares.items()}
+
+
+def _target_shift(
+    ds: CountsDataset, shifts: dict[str, torch.Tensor]
+) -> dict[str, float]:
+    """Mean shift over each condition's measured perturbed genes."""
+    where = {g: i for i, g in enumerate(ds.features)}
+    out = {}
+    for c, shift in shifts.items():
+        idx = [where[g] for g in ds.interventions[c].genes if g in where]
+        if idx:
+            out[c] = float(shift[idx].mean())
+    return out
 
 
 def _shift(ds: CountsDataset, condition: str) -> torch.Tensor:

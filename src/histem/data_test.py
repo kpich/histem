@@ -15,7 +15,7 @@ IVS = {"control": CONTROL, "ko": Intervention(name="ko")}
 def _parse(label: str) -> Intervention:
     if label == "control":
         return CONTROL
-    return Intervention(name=label, genes=tuple(label.split("_")))
+    return Intervention(name=label, genes=tuple(label.split("_")), kind="activate")
 
 
 def _adata() -> ad.AnnData:

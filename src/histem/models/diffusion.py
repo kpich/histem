@@ -1,8 +1,9 @@
 """A learned transition kernel: masked discrete diffusion over a cell's next state.
 
 Each state variable, each received signal and each perturbed gene is a token; a
-perturbed gene's token is a learned embedding, so combinations of perturbations are
-sets of tokens. A transformer over one cell's tokens passes messages between them;
+perturbed gene's token is its vector in the system's `GeneTable` plus a learned
+vector for the perturbation's kind, so combinations of perturbations are sets of
+tokens. A transformer over one cell's tokens passes messages between them;
 between cells, messages go through the simulator's signal routing. A step starts
 with every variable's next level masked and unmasks them in `rounds` random
 chunks, each conditioned on x, the received signals, the perturbed genes and the
@@ -18,7 +19,8 @@ import torch
 from pydantic import Field, PrivateAttr, model_validator
 from torch import nn
 
-from histem.dynamics import Inputs, Intervention
+from histem.dynamics import KINDS, Inputs
+from histem.genes import GeneTable
 from histem.spec import FrozenSpec, Tensor
 from histem.state import Population, StateSchema
 
@@ -28,7 +30,7 @@ class _Net(nn.Module):
         self,
         n_vars: int,
         n_signals: int,
-        n_genes: int,
+        gene_dim: int,
         levels: int,
         *,
         width: int,
@@ -38,9 +40,8 @@ class _Net(nn.Module):
         super().__init__()
         self.n_vars = n_vars
         self.token = nn.Parameter(0.02 * torch.randn(n_vars + n_signals, width))
-        self.gene = (
-            nn.Parameter(0.02 * torch.randn(n_genes, width)) if n_genes else None
-        )
+        self.gene = nn.Linear(gene_dim, width)
+        self.kind = nn.Parameter(0.02 * torch.randn(len(KINDS), width))
         self.value = nn.Linear(1, width)
         self.next = nn.Linear(levels + 1, width)  # one-hot level, last column = mask
         layer = nn.TransformerEncoderLayer(
@@ -62,16 +63,17 @@ class _Net(nn.Module):
         x: torch.Tensor,
         received: torch.Tensor,
         genes: torch.Tensor,
+        kind: int,
     ) -> torch.Tensor:
         """Logits (n, n_vars, levels) given the partial next state
-        (n, n_vars, levels + 1) and the indices of the perturbed genes."""
+        (n, n_vars, levels + 1) and the perturbed genes' table vectors (k, gene_dim)."""
         values = torch.cat([x, received], dim=1).unsqueeze(-1)
         nxt = self.next(partial)
         pad = nxt.new_zeros(x.shape[0], received.shape[1], nxt.shape[-1])
         h = self.token + self.value(values) + torch.cat([nxt, pad], dim=1)
         if len(genes):
-            assert self.gene is not None
-            h = torch.cat([h, self.gene[genes].expand(x.shape[0], -1, -1)], dim=1)
+            g = self.gene(genes) + self.kind[kind]
+            h = torch.cat([h, g.expand(x.shape[0], -1, -1)], dim=1)
         out: torch.Tensor = self.logits(self.encoder(h)[:, : self.n_vars])
         return out
 
@@ -79,8 +81,7 @@ class _Net(nn.Module):
 class DiffusionKernel(FrozenSpec):
     state_schema: StateSchema
     signals: tuple[str, ...] = ()
-    # genes `Intervention.genes` may name
-    genes: tuple[str, ...] = ()
+    gene_dim: int = Field(128, gt=0)  # the bound GeneTable's dim
     width: int = Field(64, gt=0)
     layers: int = Field(2, gt=0)
     heads: int = Field(4, gt=0)
@@ -90,6 +91,7 @@ class DiffusionKernel(FrozenSpec):
 
     _net: _Net = PrivateAttr()
     _invalid: torch.Tensor = PrivateAttr()  # (n_vars, levels) levels a var lacks
+    _genes: GeneTable | None = PrivateAttr(None)
 
     @model_validator(mode="after")
     def _build(self) -> Self:
@@ -98,7 +100,7 @@ class DiffusionKernel(FrozenSpec):
         self._net = _Net(
             len(per_var),
             len(self.signals),
-            len(self.genes),
+            self.gene_dim,
             max(per_var),
             width=self.width,
             layers=self.layers,
@@ -114,8 +116,13 @@ class DiffusionKernel(FrozenSpec):
     def levels(self) -> int:
         return int(self._invalid.shape[1])
 
-    def parameters(self) -> Iterator[torch.Tensor]:
-        return iter(self.weights.values())
+    def named_parameters(self) -> Iterator[tuple[str, torch.Tensor]]:
+        return iter(self.weights.items())
+
+    def bind_genes(self, table: GeneTable) -> None:
+        if table.dim != self.gene_dim:
+            raise ValueError(f"gene table dim {table.dim} != gene_dim {self.gene_dim}")
+        self._genes = table
 
     def _logits(
         self,
@@ -123,29 +130,28 @@ class DiffusionKernel(FrozenSpec):
         x: torch.Tensor,
         received: torch.Tensor,
         genes: torch.Tensor,
+        kind: int,
     ) -> torch.Tensor:
-        logits: torch.Tensor = self._net(partial, x, received, genes)
+        logits: torch.Tensor = self._net(partial, x, received, genes, kind)
         return logits.masked_fill(self._invalid.to(logits.device), float("-inf"))
-
-    def _gene_index(
-        self, intervention: Intervention, device: torch.device
-    ) -> torch.Tensor:
-        if unknown := set(intervention.genes) - set(self.genes):
-            raise KeyError(f"{intervention.name}: unknown genes {sorted(unknown)}")
-        idx = [self.genes.index(g) for g in intervention.genes]
-        return torch.tensor(idx, dtype=torch.long, device=device)
 
     def step(self, pop: Population, inputs: Inputs) -> Population:
         x = pop.flat()
         n, v = x.shape
-        genes = self._gene_index(inputs.intervention, x.device)
+        iv = inputs.intervention
+        genes, kind = x.new_zeros(0, self.gene_dim), 0
+        if iv.genes:
+            if self._genes is None:
+                raise RuntimeError("no gene table bound")
+            assert iv.kind is not None
+            genes, kind = self._genes.embed(iv.genes), KINDS.index(iv.kind)
         partial = x.new_zeros(n, v, self.levels + 1)
         partial[..., -1] = 1.0
         order = torch.rand(n, v, device=x.device).argsort(dim=1).argsort(dim=1)
         bounds = torch.linspace(0, v, self.rounds + 1).round().long().tolist()
         for lo, hi in itertools.pairwise(bounds):
             reveal = ((order >= lo) & (order < hi)).unsqueeze(-1)
-            logits = self._logits(partial, x, inputs.signals, genes)
+            logits = self._logits(partial, x, inputs.signals, genes, kind)
             drawn = nn.functional.gumbel_softmax(logits, hard=True)
             drawn = torch.cat([drawn, drawn.new_zeros(n, v, 1)], dim=-1)
             partial = torch.where(reveal, drawn, partial)

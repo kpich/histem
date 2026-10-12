@@ -1,10 +1,11 @@
 from collections.abc import Iterator
-from typing import Protocol, runtime_checkable
+from typing import Protocol, Self, runtime_checkable
 
 import torch
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from histem.dynamics import CONTROL, Dynamics, Intervention
+from histem.genes import GeneTable, UsesGenes
 from histem.observers import Observer
 from histem.simulator import Signaling, simulate
 from histem.spec import FrozenSpec, Tagged
@@ -23,18 +24,34 @@ class UniformInit(FrozenSpec):
 
 @runtime_checkable
 class Learnable(Protocol):
-    def parameters(self) -> Iterator[torch.Tensor]: ...
+    def named_parameters(self) -> Iterator[tuple[str, torch.Tensor]]: ...
 
 
 class CellSystem(FrozenSpec):
     dynamics: Tagged[Dynamics]
     observers: dict[str, Tagged[Observer]]
     init: Tagged[Init] = Field(default_factory=UniformInit)
+    # the one owner of the gene vectors that dynamics and observers share
+    genes: GeneTable | None = None
     burn_in: int = Field(50, ge=0)
     # under autograd, backprop through only the last `grad_steps` of burn-in
     grad_steps: int | None = Field(None, ge=0)
     signaling: Signaling = Field(default_factory=Signaling)
     device: str = "cpu"
+
+    @model_validator(mode="after")
+    def _bind_genes(self) -> Self:
+        for part in self._parts().values():
+            if isinstance(part, UsesGenes):
+                if self.genes is None:
+                    raise ValueError(f"{type(part).__name__} needs a gene table")
+                part.bind_genes(self.genes)
+        return self
+
+    def _parts(self) -> dict[str, object]:
+        parts = {"dynamics": self.dynamics, "init": self.init, "genes": self.genes}
+        parts |= {f"observers/{k}": v for k, v in self.observers.items()}
+        return parts
 
     def sample_cells(self, n: int, intervention: Intervention = CONTROL) -> Population:
         pop = self.init.sample(self.dynamics.state_schema, n, self.device)
@@ -69,10 +86,15 @@ class CellSystem(FrozenSpec):
         cells = self.sample_cells(n, intervention)
         return observer.rsample(cells) if reparam else observer.observe(cells)
 
-    def parameters(self) -> Iterator[torch.Tensor]:
-        for part in [self.dynamics, self.init, *self.observers.values()]:
+    def named_parameters(self) -> Iterator[tuple[str, torch.Tensor]]:
+        for prefix, part in self._parts().items():
             if isinstance(part, Learnable):
-                yield from part.parameters()
+                for name, p in part.named_parameters():
+                    yield f"{prefix}/{name}", p
+
+    def parameters(self) -> Iterator[torch.Tensor]:
+        for _, p in self.named_parameters():
+            yield p
 
     def to(self, device: str) -> "CellSystem":
         """A copy with every tensor on `device`; learnable parameters are new."""

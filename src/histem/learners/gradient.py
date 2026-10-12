@@ -13,25 +13,31 @@ def gradient_fit(
     *,
     lr: float = 1e-2,
     clip: float | None = 1.0,
-    callback: Callable[[int, float, float], None] | None = None,
+    callback: Callable[[int, float, dict[str, float]], None] | None = None,
 ) -> list[float]:
     """Adam on `suite.loss`, with the gradient norm clipped to `clip`. Updates the
     system's parameters in place and returns the losses. `callback(step, loss,
-    grad_norm)` runs after each step."""
-    params = list(system.parameters())
-    if not params:
+    grad_norms)` runs after each step; `grad_norms` are before clipping, per named
+    parameter plus "total"."""
+    named = dict(system.named_parameters())
+    if not named:
         raise ValueError("system has no learnable parameters")
+    params = list(named.values())
     opt = torch.optim.Adam(params, lr=lr)
     losses = []
     for it in range(1, steps + 1):
         opt.zero_grad()
         loss = suite.loss(system)
         loss.backward()
-        norm = torch.nn.utils.clip_grad_norm_(
+        norms = torch.stack(
+            [p.grad.norm() if p.grad is not None else p.new_zeros(()) for p in params]
+        )
+        total = torch.nn.utils.clip_grad_norm_(
             params, float("inf") if clip is None else clip
         )
         opt.step()
         losses.append(loss.item())
         if callback is not None:
-            callback(it, losses[-1], float(norm))
+            values = torch.cat([norms, total.reshape(1)]).tolist()
+            callback(it, losses[-1], dict(zip([*named, "total"], values, strict=True)))
     return losses

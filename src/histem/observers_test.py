@@ -1,5 +1,6 @@
 import torch
 
+from histem.genes import GeneTable
 from histem.observers import DecoderObserver
 from histem.state import latent_schema
 
@@ -7,7 +8,10 @@ SCHEMA = latent_schema(2, 3)
 
 
 def _observer() -> DecoderObserver:
-    obs = DecoderObserver(genes=("g",), drivers=tuple(SCHEMA.variables), size_sd=0.0)
+    obs = DecoderObserver(
+        genes=("g",), drivers=tuple(SCHEMA.variables), gene_dim=4, size_sd=0.0
+    )
+    obs.bind_genes(GeneTable(genes=("g",), dim=4))
     obs.set_bias(torch.tensor([2.0]))
     return obs
 

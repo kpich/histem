@@ -15,4 +15,4 @@ def test_steps_stay_on_each_variables_levels(system: CellSystem) -> None:
 
 def test_unknown_gene_rejected(system: CellSystem) -> None:
     with pytest.raises(KeyError, match="unknown genes"):
-        system.sample_cells(2, Intervention(name="Z", genes=("Z",)))
+        system.sample_cells(2, Intervention(name="Z", genes=("Z",), kind="activate"))

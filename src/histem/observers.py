@@ -6,6 +6,7 @@ import torch
 from pydantic import Field, PrivateAttr, model_validator
 from torch import nn
 
+from histem.genes import GeneTable
 from histem.spec import FrozenSpec, Tensor
 from histem.state import Population
 
@@ -39,40 +40,46 @@ def state_features(pop: Population, variables: tuple[str, ...]) -> torch.Tensor:
 
 
 class _Decoder(nn.Module):
-    def __init__(self, n_drivers: int, n_genes: int, width: int):
+    def __init__(self, n_drivers: int, n_genes: int, width: int, gene_dim: int):
         super().__init__()
         self.hidden = nn.Sequential(nn.Linear(n_drivers, width), nn.SiLU())
-        self.out = nn.Linear(width, n_genes)
+        # a gene's output weights are a projection of its table vector
+        self.out = nn.Linear(gene_dim, width, bias=False)
         nn.init.zeros_(self.out.weight)
-        nn.init.zeros_(self.out.bias)
         self.bias = nn.Parameter(torch.zeros(n_genes))
         self.log_dispersion = nn.Parameter(torch.full((n_genes,), math.log(5.0)))
 
-    def forward(self, features: torch.Tensor) -> torch.Tensor:
-        out: torch.Tensor = self.bias + self.out(self.hidden(features))
+    def forward(self, features: torch.Tensor, genes: torch.Tensor) -> torch.Tensor:
+        """`genes` (n_genes, gene_dim) are the observed genes' table vectors."""
+        out: torch.Tensor = self.bias + self.hidden(features) @ self.out(genes).T
         return out
 
 
 class DecoderObserver(FrozenSpec):
-    """log mean_g = log(size) + bias_g + MLP(features(state))_g, with a learned
-    per-gene NB dispersion. The MLP starts at zero, so set `bias` to the data's
-    log mean counts to start at the right scale."""
+    """log mean_g = log(size) + bias_g + MLP(features(state)) . W e_g, where e_g is
+    gene g's vector in the bound `GeneTable`, with a learned per-gene NB
+    dispersion. W starts at zero, so set `bias` to the data's log mean counts to
+    start at the right scale."""
 
     genes: tuple[str, ...] = Field(min_length=1)
     drivers: tuple[str, ...] = Field(min_length=1)
     width: int = Field(128, gt=0)
+    gene_dim: int = Field(128, gt=0)  # the bound GeneTable's dim
     size_sd: float = Field(0.3, ge=0)  # sd of log library size
     modality: str = "rna"
     # empty means freshly initialized; afterwards it holds the live parameters
     weights: dict[str, Tensor] = Field(default_factory=dict)
 
     _net: _Decoder = PrivateAttr()
+    _genes: GeneTable | None = PrivateAttr(None)
 
     @model_validator(mode="after")
     def _build(self) -> Self:
         if len(set(self.genes)) != len(self.genes):
             raise ValueError("duplicate gene names")
-        self._net = _Decoder(len(self.drivers), len(self.genes), self.width)
+        self._net = _Decoder(
+            len(self.drivers), len(self.genes), self.width, self.gene_dim
+        )
         if self.weights:
             self._net.load_state_dict(self.weights, assign=True)
         self.weights.clear()
@@ -83,8 +90,13 @@ class DecoderObserver(FrozenSpec):
     def features(self) -> tuple[str, ...]:
         return self.genes
 
-    def parameters(self) -> Iterator[torch.Tensor]:
-        return iter(self.weights.values())
+    def named_parameters(self) -> Iterator[tuple[str, torch.Tensor]]:
+        return iter(self.weights.items())
+
+    def bind_genes(self, table: GeneTable) -> None:
+        if table.dim != self.gene_dim:
+            raise ValueError(f"gene table dim {table.dim} != gene_dim {self.gene_dim}")
+        self._genes = table
 
     def set_bias(self, bias: torch.Tensor) -> None:
         with torch.no_grad():
@@ -92,7 +104,12 @@ class DecoderObserver(FrozenSpec):
 
     def log_mean(self, pop: Population) -> torch.Tensor:
         log_size = self.size_sd * torch.randn((pop.n, 1), device=pop.device)
-        out: torch.Tensor = log_size + self._net(state_features(pop, self.drivers))
+        if self._genes is None:
+            raise RuntimeError("no gene table bound")
+        features = state_features(pop, self.drivers)
+        out: torch.Tensor = log_size + self._net(
+            features, self._genes.embed(self.genes)
+        )
         return out
 
     def observe(self, pop: Population) -> torch.Tensor:

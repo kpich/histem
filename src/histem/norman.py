@@ -12,7 +12,7 @@ def intervention(label: str) -> Intervention:
     """ "A_B" activates A and B."""
     if label == "control":
         return CONTROL
-    return Intervention(name=label, genes=tuple(label.split("_")))
+    return Intervention(name=label, genes=tuple(label.split("_")), kind="activate")
 
 
 def load(n_genes: int = 1000, max_cells: int = 500, seed: int = 0) -> CountsDataset:
