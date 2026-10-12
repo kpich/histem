@@ -24,9 +24,9 @@ def ds() -> CountsDataset:
         counts={c: torch.poisson(base * torch.tensor(s)) for c, s in scale.items()},
         interventions={
             "control": CONTROL,
-            "A": Intervention(name="A", genes=("A",)),
-            "B": Intervention(name="B", genes=("B",)),
-            "A_B": Intervention(name="A_B", genes=("A", "B")),
+            "A": Intervention(name="A", genes=("A",), kind="activate"),
+            "B": Intervention(name="B", genes=("B",), kind="activate"),
+            "A_B": Intervention(name="A_B", genes=("A", "B"), kind="activate"),
         },
     )
 
