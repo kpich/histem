@@ -93,8 +93,6 @@ class DiffusionKernel(FrozenSpec):
 
     @model_validator(mode="after")
     def _build(self) -> Self:
-        if bad := [s.name for s in self.state_schema.slots if s.kind != "continuous"]:
-            raise ValueError(f"DiffusionKernel needs continuous slots, got {bad}")
         per_var = [s.levels for s in self.state_schema.slots for _ in s.variables]
         self._invalid = torch.arange(max(per_var)) >= torch.tensor(per_var)[:, None]
         self._net = _Net(

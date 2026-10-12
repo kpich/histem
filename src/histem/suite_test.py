@@ -2,14 +2,14 @@ from pathlib import Path
 
 import pytest
 
-from histem import synthetic
 from histem.data import CountsDataset
 from histem.suite import Suite
+from histem.system import CellSystem
 
 
-def test_objective_weights_datasets_not_conditions() -> None:
-    system = synthetic.make_system().model_copy(update={"burn_in": 2})
-    ds = synthetic.make_dataset(system, cells_per_condition=10)
+def test_objective_weights_datasets_not_conditions(
+    ds: CountsDataset, system: CellSystem
+) -> None:
     big, small = ds.split(["control"])
     suite = Suite(datasets=[big, small], cells_per_condition=10)
     per_ds = suite.evaluate(system).by_dataset()
@@ -18,9 +18,9 @@ def test_objective_weights_datasets_not_conditions() -> None:
     assert heavy.objective == pytest.approx(expected)
 
 
-def test_save_load_round_trip(tmp_path: Path) -> None:
-    system = synthetic.make_system().model_copy(update={"burn_in": 2})
-    ds = synthetic.make_dataset(system, cells_per_condition=10)
+def test_save_load_round_trip(
+    tmp_path: Path, ds: CountsDataset, system: CellSystem
+) -> None:
     suite = Suite(datasets=[ds], cells_per_condition=10, weights={ds.name: 2.0})
     suite.save(tmp_path)
     loaded = Suite.load(tmp_path)

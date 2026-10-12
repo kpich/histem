@@ -28,7 +28,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/histem"]
-exclude = ["*_test.py"]
+exclude = ["*_test.py", "conftest.py"]
 
 [tool.ruff]
 line-length = 88
