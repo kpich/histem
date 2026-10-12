@@ -8,8 +8,8 @@ import time
 
 import torch
 
-from histem import baselines, norman, plots
-from histem.data import CountsDataset
+from histem import baselines, latent, norman, plots
+from histem.data import CountsDataset, combo_split
 from histem.learners.gradient import gradient_fit
 from histem.metrics import energy_distance
 from histem.rng import seeded
@@ -138,7 +138,7 @@ def main() -> None:
     args = _args()
     torch.manual_seed(args.seed)
     ds = norman.load(args.genes, args.max_cells)
-    held_out = norman.combo_split(ds, args.held_out_frac, args.seed)
+    held_out = combo_split(ds, args.held_out_frac, args.seed)
     train, _ = ds.split(held_out)
     fit_suite = Suite(
         datasets=[train],
@@ -150,7 +150,7 @@ def main() -> None:
     picked = torch.randperm(len(others), generator=g)[: args.train_eval].tolist()
     watched = ["control", *sorted(others[i] for i in picked)]
 
-    system = norman.make_system(
+    system = latent.make_system(
         ds,
         latents=args.latents,
         levels=args.levels,

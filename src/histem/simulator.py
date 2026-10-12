@@ -56,18 +56,12 @@ def simulate(
     *,
     intervention: Intervention = CONTROL,
     signaling: Signaling | None = None,
-    record_every: int | None = None,
-) -> tuple[Population, list[Population]]:
-    """Returns (final population, snapshots every `record_every` steps)."""
+) -> Population:
     signaling = signaling or Signaling()
-    dyn = dynamics.intervene(intervention)
     pop = pop.copy()
     intervention.apply(pop)
-    trajectory = []
-    for t in range(steps):
-        received = signaling.route(dyn.emit_signals(pop))
-        pop = dyn.step(pop, Inputs(received, intervention))
+    for _ in range(steps):
+        received = signaling.route(dynamics.emit_signals(pop))
+        pop = dynamics.step(pop, Inputs(received, intervention))
         intervention.apply(pop)
-        if record_every and (t + 1) % record_every == 0:
-            trajectory.append(pop.copy())
-    return pop, trajectory
+    return pop

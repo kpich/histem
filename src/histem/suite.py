@@ -26,13 +26,8 @@ class Suite(Spec):
     cells_per_condition: int = Field(300, gt=0)
     # `loss` uses this many random conditions per dataset; None means all
     loss_conditions: int | None = Field(None, gt=0)
-    # same seed for every candidate, so score differences aren't sampling noise
+    # `evaluate` draws with this seed, so score differences aren't sampling noise
     seed: int = 0
-
-    def add(self, dataset: Dataset) -> None:
-        if any(d.name == dataset.name for d in self.datasets):
-            raise ValueError(f"dataset {dataset.name!r} already in suite")
-        self.datasets.append(dataset)
 
     def loss(self, system: CellSystem) -> torch.Tensor:
         """Differentiable objective, on fresh samples."""
@@ -70,11 +65,3 @@ class Suite(Spec):
         w = {k: self.weights.get(k, 1.0) for k in per_ds}
         objective = sum(w[k] * v for k, v in per_ds.items()) / sum(w.values())
         return Scores(fit=fit, objective=objective)
-
-    @staticmethod
-    def regressions(
-        before: Scores, after: Scores, tolerance: float = 0.05
-    ) -> list[str]:
-        """Datasets whose mean fit got worse by more than `tolerance` (relative)."""
-        b, a = before.by_dataset(), after.by_dataset()
-        return [k for k in b if k in a and a[k] > b[k] * (1 + tolerance)]

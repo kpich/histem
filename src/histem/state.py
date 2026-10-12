@@ -1,5 +1,5 @@
-from dataclasses import dataclass, field
-from typing import Any, Literal, Self
+from dataclasses import dataclass
+from typing import Literal, Self
 
 import torch
 from pydantic import Field, model_validator
@@ -15,7 +15,6 @@ class Slot(FrozenSpec):
     kind: SlotKind = "discrete"
     # discrete values are 0..levels-1; continuous ones are a relaxation on that scale
     levels: int = 2
-    observed: bool = False
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -109,8 +108,6 @@ class Population:
 
     schema: StateSchema
     values: dict[str, torch.Tensor]
-    positions: torch.Tensor | None = None  # (n, d)
-    meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def n(self) -> int:
@@ -119,14 +116,6 @@ class Population:
     def get(self, variable: str) -> torch.Tensor:
         slot, i = self.schema.locate(variable)
         return self.values[slot][:, i]
-
-    def variable_view(self) -> dict[str, torch.Tensor]:
-        """Flat {variable: (n,) array} view, without copying."""
-        return {
-            v: self.values[s.name][:, i]
-            for s in self.schema.slots
-            for i, v in enumerate(s.variables)
-        }
 
     def flat(self) -> torch.Tensor:
         """(n, n_variables) float, in schema order."""
@@ -138,26 +127,11 @@ class Population:
             s.name: part.to(s.dtype)
             for s, part in zip(self.schema.slots, x.split(dims, dim=1), strict=True)
         }
-        return Population(self.schema, values, self.positions, dict(self.meta))
+        return Population(self.schema, values)
 
     @property
     def device(self) -> torch.device:
         return next(iter(self.values.values())).device
 
     def copy(self) -> "Population":
-        pos = None if self.positions is None else self.positions.clone()
-        return Population(
-            self.schema,
-            {k: v.clone() for k, v in self.values.items()},
-            pos,
-            dict(self.meta),
-        )
-
-    def subset(self, idx: torch.Tensor | slice) -> "Population":
-        pos = None if self.positions is None else self.positions[idx]
-        return Population(
-            self.schema,
-            {k: v[idx] for k, v in self.values.items()},
-            pos,
-            dict(self.meta),
-        )
+        return Population(self.schema, {k: v.clone() for k, v in self.values.items()})

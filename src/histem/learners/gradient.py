@@ -1,15 +1,9 @@
 from collections.abc import Callable
 
 import torch
-from pydantic import Field
 
-from histem.spec import Spec
 from histem.suite import Suite
 from histem.system import CellSystem
-
-
-class FitLog(Spec):
-    losses: list[float] = Field(default_factory=list)
 
 
 def gradient_fit(
@@ -19,17 +13,16 @@ def gradient_fit(
     *,
     lr: float = 1e-2,
     clip: float | None = 1.0,
-    verbose: bool = False,
     callback: Callable[[int, float, float], None] | None = None,
-) -> FitLog:
+) -> list[float]:
     """Adam on `suite.loss`, with the gradient norm clipped to `clip`. Updates the
-    system's parameters in place. `callback(step, loss, grad_norm)` runs after each
-    step."""
+    system's parameters in place and returns the losses. `callback(step, loss,
+    grad_norm)` runs after each step."""
     params = list(system.parameters())
     if not params:
         raise ValueError("system has no learnable parameters")
     opt = torch.optim.Adam(params, lr=lr)
-    log = FitLog()
+    losses = []
     for it in range(1, steps + 1):
         opt.zero_grad()
         loss = suite.loss(system)
@@ -38,9 +31,7 @@ def gradient_fit(
             params, float("inf") if clip is None else clip
         )
         opt.step()
-        log.losses.append(loss.item())
+        losses.append(loss.item())
         if callback is not None:
-            callback(it, log.losses[-1], float(norm))
-        if verbose and (it % 10 == 0 or it == steps):
-            print(f"[{it}] loss={log.losses[-1]:.4f}")
-    return log
+            callback(it, losses[-1], float(norm))
+    return losses
