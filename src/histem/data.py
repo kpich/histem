@@ -1,8 +1,10 @@
+from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol, Self, TypeVar, runtime_checkable
 
 import anndata as ad
 import numpy as np
+import scipy.sparse as sp
 import torch
 from pydantic import model_validator
 
@@ -39,8 +41,6 @@ class CountsDataset(FrozenSpec):
     name: str
     features: tuple[str, ...]
     counts: dict[str, Tensor]  # condition -> (n_cells, n_features)
-    # condition -> (n_cells,) library size; defaults to the row sums of `counts`
-    totals: dict[str, Tensor] | None = None
     interventions: dict[str, Intervention]
     modality: str = "rna"
 
@@ -56,37 +56,6 @@ class CountsDataset(FrozenSpec):
                 )
         return self
 
-    @classmethod
-    def from_anndata(
-        cls,
-        name: str,
-        adata: ad.AnnData,
-        interventions: dict[str, Intervention],
-        *,
-        condition_key: str = "condition",
-        features: list[str] | None = None,
-        modality: str = "rna",
-    ) -> Self:
-        if condition_key not in adata.obs:
-            raise ValueError(f"adata.obs has no column {condition_key!r}")
-        features = features or list(adata.var_names)
-        labels = adata.obs[condition_key].astype(str).to_numpy()
-        counts, totals = {}, {}
-        for cond in interventions:
-            sub = adata[labels == cond]
-            if sub.n_obs == 0:
-                continue
-            totals[cond] = torch.as_tensor(_dense(sub.X).sum(axis=1))
-            counts[cond] = torch.as_tensor(_dense(sub[:, features].X))
-        return cls(
-            name=name,
-            features=tuple(features),
-            counts=counts,
-            totals=totals,
-            interventions=interventions,
-            modality=modality,
-        )
-
     @property
     def conditions(self) -> list[str]:
         return [c for c in self.interventions if c in self.counts]
@@ -98,15 +67,19 @@ class CountsDataset(FrozenSpec):
         return self._subset("train", keep), self._subset("test", held_out)
 
     def _subset(self, suffix: str, conditions: list[str]) -> Self:
-        totals = None if self.totals is None else _pick(self.totals, conditions)
         return self.model_copy(
             update={
                 "name": f"{self.name}/{suffix}",
                 "counts": _pick(self.counts, conditions),
-                "totals": totals,
                 "interventions": _pick(self.interventions, conditions),
             }
         )
+
+    def singles(self) -> dict[str, str]:
+        """Gene -> the condition that perturbs it alone."""
+        return {
+            iv.genes[0]: c for c, iv in self.interventions.items() if len(iv.genes) == 1
+        }
 
     def loss(self, system: CellSystem, condition: str, n: int) -> torch.Tensor:
         observer = system.observers[self.modality]
@@ -116,13 +89,12 @@ class CountsDataset(FrozenSpec):
         return energy_distance(x.to(y.device), y)
 
     def normalized(self, condition: str, n: int | None = None) -> torch.Tensor:
-        """Log-normalized observed cells; a random n of them if there are more."""
+        """Log-normalized observed cells; a random n of them if there are more.
+        Library sizes are row sums over `features`, as for simulated cells."""
         obs = self.counts[condition]
-        tot = obs.sum(dim=1) if self.totals is None else self.totals[condition]
         if n is not None and obs.shape[0] > n:
-            idx = torch.randperm(obs.shape[0])[:n]
-            obs, tot = obs[idx], tot[idx]
-        return log_normalize(obs, tot)
+            obs = obs[torch.randperm(obs.shape[0])[:n]]
+        return log_normalize(obs, obs.sum(dim=1))
 
     def simulated(self, system: CellSystem, condition: str, n: int) -> torch.Tensor:
         """n log-normalized simulated cells, over the observer's features."""
@@ -133,6 +105,72 @@ class CountsDataset(FrozenSpec):
             reparam=torch.is_grad_enabled(),
         )
         return log_normalize(sim, sim.sum(dim=1))
+
+
+def from_anndata(
+    name: str,
+    adata: ad.AnnData,
+    intervention: Callable[[str], Intervention],
+    *,
+    n_genes: int,
+    max_cells: int,
+    seed: int,
+    condition_key: str = "perturbation",
+) -> CountsDataset:
+    """The `n_genes` most variable genes in log-normalized expression, plus every
+    measured target gene; at most `max_cells` cells per condition. `intervention`
+    parses a condition label."""
+    x = sp.csc_matrix(adata.X)
+    labels = adata.obs[condition_key].astype(str).to_numpy()
+    totals = np.asarray(x.sum(axis=1)).ravel()
+    norm = sp.csc_matrix(x.multiply(1e4 / np.maximum(totals, 1)[:, None]))
+    norm.data = np.log1p(norm.data)
+    mean = np.asarray(norm.mean(axis=0)).ravel()
+    var = np.asarray(norm.multiply(norm).mean(axis=0)).ravel() - mean**2
+    names = list(adata.var_names)
+    cols = sorted(np.argsort(-var)[:n_genes].tolist())
+    interventions = {c: intervention(c) for c in sorted(set(labels))}
+    targets = {g for iv in interventions.values() for g in iv.genes}
+    where = {g: i for i, g in enumerate(names)}
+    cols += sorted(where[g] for g in targets if g in where and where[g] not in cols)
+
+    sub = sp.csr_matrix(x[:, cols])
+    rng = np.random.default_rng(seed)
+    counts = {}
+    for c in interventions:
+        rows = np.flatnonzero(labels == c)
+        if len(rows) > max_cells:
+            rows = np.sort(rng.choice(rows, max_cells, replace=False))
+        counts[c] = torch.as_tensor(sub[rows].toarray(), dtype=torch.float32)
+    return CountsDataset(
+        name=name,
+        features=tuple(names[i] for i in cols),
+        counts=counts,
+        interventions=interventions,
+    )
+
+
+def cached(key: str, build: Callable[[], CountsDataset]) -> CountsDataset:
+    """`build()`, saved under ../data/processed/`key` on first use."""
+    path = DATA_DIR / "processed" / key
+    if (path / "config.json").exists():
+        return CountsDataset.load(path)
+    ds = build()
+    ds.save(path)
+    return ds
+
+
+def combo_split(ds: CountsDataset, frac: float = 0.2, seed: int = 0) -> list[str]:
+    """A random `frac` of the double perturbations whose singles are both present."""
+    singles = ds.singles()
+    combos = [
+        c
+        for c, iv in ds.interventions.items()
+        if len(iv.genes) == 2 and set(iv.genes) <= singles.keys()
+    ]
+    g = torch.Generator().manual_seed(seed)
+    idx = torch.randperm(len(combos), generator=g)[: round(frac * len(combos))]
+    return sorted(combos[i] for i in idx.tolist())
 
 
 def _shared(
@@ -147,8 +185,3 @@ def _shared(
 
 def _pick(d: dict[str, T], keys: list[str]) -> dict[str, T]:
     return {k: v for k, v in d.items() if k in keys}
-
-
-def _dense(x: object) -> np.ndarray:
-    dense = x.toarray() if hasattr(x, "toarray") else x
-    return np.asarray(dense, dtype=np.float32)

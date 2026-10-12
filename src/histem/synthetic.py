@@ -17,7 +17,7 @@ TFS = ("GATA1", "PU1", "FLI1", "KLF1", "CEBPA", "MYC")
 
 SCHEMA = StateSchema(
     slots=(
-        Slot(name="expr", variables=TFS, levels=3, observed=True),
+        Slot(name="expr", variables=TFS, levels=3),
         Slot(name="chromatin", variables=("acc_GATA1", "acc_CEBPA"), levels=2),
         Slot(name="mito", variables=("mito_cn",), levels=3),
     )
@@ -37,10 +37,6 @@ class ForkProgram(FrozenSpec):
     @property
     def state_schema(self) -> StateSchema:
         return SCHEMA
-
-    @property
-    def signal_names(self) -> tuple[str, ...]:
-        return ("IL",)
 
     def targets(
         self, v: dict[str, torch.Tensor], il: torch.Tensor
@@ -76,9 +72,6 @@ class ForkProgram(FrozenSpec):
 
     def emit_signals(self, pop: Population) -> torch.Tensor:
         return (pop.get("PU1") >= 2).float().unsqueeze(1)
-
-    def intervene(self, intervention: Intervention) -> "ForkProgram":
-        return self
 
 
 DRIVERS = (*TFS, "mito_cn")

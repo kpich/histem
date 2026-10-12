@@ -42,21 +42,20 @@ class CellSystem(FrozenSpec):
         if self.grad_steps is not None and torch.is_grad_enabled():
             tracked = min(self.grad_steps, self.burn_in)
             with torch.no_grad():
-                pop, _ = simulate(
+                pop = simulate(
                     self.dynamics,
                     pop,
                     self.burn_in - tracked,
                     intervention=intervention,
                     signaling=self.signaling,
                 )
-        pop, _ = simulate(
+        return simulate(
             self.dynamics,
             pop,
             tracked,
             intervention=intervention,
             signaling=self.signaling,
         )
-        return pop
 
     def sample(
         self,
@@ -69,9 +68,6 @@ class CellSystem(FrozenSpec):
         observer = self.observers[modality]
         cells = self.sample_cells(n, intervention)
         return observer.rsample(cells) if reparam else observer.observe(cells)
-
-    def with_dynamics(self, dynamics: Dynamics) -> "CellSystem":
-        return self.model_copy(update={"dynamics": dynamics})
 
     def parameters(self) -> Iterator[torch.Tensor]:
         for part in [self.dynamics, self.init, *self.observers.values()]:

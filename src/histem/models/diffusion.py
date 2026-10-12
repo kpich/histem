@@ -113,10 +113,6 @@ class DiffusionKernel(FrozenSpec):
         return self
 
     @property
-    def signal_names(self) -> tuple[str, ...]:
-        return self.signals
-
-    @property
     def levels(self) -> int:
         return int(self._invalid.shape[1])
 
@@ -162,6 +158,3 @@ class DiffusionKernel(FrozenSpec):
         if self._net.emit is None:
             return torch.zeros((pop.n, 0), device=pop.device)
         return nn.functional.softplus(self._net.emit(pop.flat()))
-
-    def intervene(self, intervention: Intervention) -> Self:
-        return self

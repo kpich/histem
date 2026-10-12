@@ -14,9 +14,7 @@ def control(ds: CountsDataset, condition: str, n: int) -> torch.Tensor:
 
 def additive_shift(ds: CountsDataset, condition: str) -> torch.Tensor:
     """Sum of each single perturbation's mean shift from control."""
-    singles = {
-        iv.genes[0]: c for c, iv in ds.interventions.items() if len(iv.genes) == 1
-    }
+    singles = ds.singles()
     genes = ds.interventions[condition].genes
     if missing := [g for g in genes if g not in singles]:
         raise KeyError(f"{condition}: no single perturbation for {missing}")
