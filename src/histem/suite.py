@@ -10,7 +10,6 @@ from histem.system import CellSystem
 
 class Scores(FrozenSpec):
     fit: dict[tuple[str, str], float]  # (dataset, condition) -> loss
-    description_length: float
     objective: float
 
     def by_dataset(self) -> dict[str, float]:
@@ -24,7 +23,6 @@ class Suite(Spec):
     datasets: list[Tagged[Dataset]] = Field(default_factory=list)
     # dataset name -> weight in the objective; missing names weigh 1
     weights: dict[str, float] = Field(default_factory=dict)
-    complexity_weight: float = Field(1e-3, ge=0)
     cells_per_condition: int = Field(300, gt=0)
     # `loss` uses this many random conditions per dataset; None means all
     loss_conditions: int | None = Field(None, gt=0)
@@ -37,7 +35,7 @@ class Suite(Spec):
         self.datasets.append(dataset)
 
     def loss(self, system: CellSystem) -> torch.Tensor:
-        """Differentiable fit term of the objective, on fresh samples."""
+        """Differentiable objective, on fresh samples."""
         if not self.datasets:
             raise ValueError("suite has no datasets")
         per_ds = {
@@ -68,16 +66,10 @@ class Suite(Spec):
                     fit[(ds.name, cond)] = float(loss)
         if not fit:
             raise ValueError("suite has no (dataset, condition) pairs to score")
-        scores = Scores(fit=fit, description_length=0.0, objective=0.0)
-        per_ds = scores.by_dataset()
+        per_ds = Scores(fit=fit, objective=0.0).by_dataset()
         w = {k: self.weights.get(k, 1.0) for k in per_ds}
-        fit_term = sum(w[k] * v for k, v in per_ds.items()) / sum(w.values())
-        dl = system.description_length()
-        return Scores(
-            fit=fit,
-            description_length=dl,
-            objective=fit_term + self.complexity_weight * dl,
-        )
+        objective = sum(w[k] * v for k, v in per_ds.items()) / sum(w.values())
+        return Scores(fit=fit, objective=objective)
 
     @staticmethod
     def regressions(

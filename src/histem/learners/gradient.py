@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 import torch
 from pydantic import Field
 
@@ -18,9 +20,11 @@ def gradient_fit(
     lr: float = 1e-2,
     clip: float | None = 1.0,
     verbose: bool = False,
+    callback: Callable[[int, float, float], None] | None = None,
 ) -> FitLog:
     """Adam on `suite.loss`, with the gradient norm clipped to `clip`. Updates the
-    system's parameters in place."""
+    system's parameters in place. `callback(step, loss, grad_norm)` runs after each
+    step."""
     params = list(system.parameters())
     if not params:
         raise ValueError("system has no learnable parameters")
@@ -30,10 +34,13 @@ def gradient_fit(
         opt.zero_grad()
         loss = suite.loss(system)
         loss.backward()
-        if clip is not None:
-            torch.nn.utils.clip_grad_norm_(params, clip)
+        norm = torch.nn.utils.clip_grad_norm_(
+            params, float("inf") if clip is None else clip
+        )
         opt.step()
         log.losses.append(loss.item())
+        if callback is not None:
+            callback(it, log.losses[-1], float(norm))
         if verbose and (it % 10 == 0 or it == steps):
             print(f"[{it}] loss={log.losses[-1]:.4f}")
     return log

@@ -85,8 +85,3 @@ class CellSystem(FrozenSpec):
         config["device"] = device
         moved = {k: v.to(device) for k, v in tensors.items()}
         return self.model_validate(config, context={"tensors": moved})
-
-    def description_length(self) -> float:
-        return self.dynamics.description_length() + sum(
-            o.description_length() for o in self.observers.values()
-        )

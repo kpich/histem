@@ -32,9 +32,6 @@ class Relay(FrozenSpec):
     def intervene(self, intervention: Intervention) -> "Relay":
         return self
 
-    def description_length(self) -> float:
-        return 0.0
-
 
 def test_paracrine_signal_reaches_neighbors() -> None:
     pop = SCHEMA.empty(3)

@@ -80,9 +80,6 @@ class ForkProgram(FrozenSpec):
     def intervene(self, intervention: Intervention) -> "ForkProgram":
         return self
 
-    def description_length(self) -> float:
-        return 0.0
-
 
 DRIVERS = (*TFS, "mito_cn")
 

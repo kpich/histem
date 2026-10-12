@@ -111,20 +111,28 @@ class CountsDataset(FrozenSpec):
     def loss(self, system: CellSystem, condition: str, n: int) -> torch.Tensor:
         observer = system.observers[self.modality]
         mine, theirs = _shared(self.features, observer.features)
+        x = self.normalized(condition, n)[:, mine]
+        y = self.simulated(system, condition, n)[:, theirs]
+        return energy_distance(x.to(y.device), y)
+
+    def normalized(self, condition: str, n: int | None = None) -> torch.Tensor:
+        """Log-normalized observed cells; a random n of them if there are more."""
         obs = self.counts[condition]
         tot = obs.sum(dim=1) if self.totals is None else self.totals[condition]
-        if obs.shape[0] > n:
+        if n is not None and obs.shape[0] > n:
             idx = torch.randperm(obs.shape[0])[:n]
             obs, tot = obs[idx], tot[idx]
+        return log_normalize(obs, tot)
+
+    def simulated(self, system: CellSystem, condition: str, n: int) -> torch.Tensor:
+        """n log-normalized simulated cells, over the observer's features."""
         sim = system.sample(
             n,
             self.interventions[condition],
             self.modality,
             reparam=torch.is_grad_enabled(),
         )
-        x = log_normalize(obs[:, mine], tot).to(sim.device)
-        y = log_normalize(sim[:, theirs], sim.sum(dim=1))
-        return energy_distance(x, y)
+        return log_normalize(sim, sim.sum(dim=1))
 
 
 def _shared(

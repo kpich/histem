@@ -95,6 +95,14 @@ class StateSchema(FrozenSpec):
         )
 
 
+def latent_schema(k: int, levels: int) -> StateSchema:
+    """k unnamed continuous variables z0..z{k-1}, in one slot."""
+    variables = tuple(f"z{i}" for i in range(k))
+    return StateSchema(
+        slots=(Slot(name="z", variables=variables, kind="continuous", levels=levels),)
+    )
+
+
 @dataclass
 class Population:
     """`values[slot]` has shape (n_cells, slot.dim)."""

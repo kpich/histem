@@ -1,4 +1,4 @@
-.PHONY: install install-precommit-hooks check lint format typecheck test int-test fit
+.PHONY: install install-precommit-hooks check lint format typecheck test int-test fit norman tb
 
 install:
 	uv sync
@@ -27,3 +27,9 @@ int-test:
 
 fit:
 	uv run scripts/synthetic_fit.py
+
+norman:
+	uv run scripts/norman_fit.py
+
+tb:
+	uv run tensorboard --logdir ../runs
