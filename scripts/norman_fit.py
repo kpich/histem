@@ -56,11 +56,9 @@ class Evaluator:
         args: argparse.Namespace,
     ):
         self.ds, self.watched, self.held_out, self.log = ds, watched, held_out, log
-        self.n, self.seed, self.n_plots = (
-            args.eval_cells,
-            args.seed,
-            args.plot_conditions,
-        )
+        self.n = args.eval_cells
+        self.seed = args.seed
+        self.n_plots = args.plot_conditions
         with torch.no_grad(), seeded(self.seed):
             self.control_ed = {
                 c: float(baselines.control(ds, c, self.n)) for c in watched + held_out
@@ -73,11 +71,12 @@ class Evaluator:
 
     def __call__(self, system: CellSystem, step: int) -> None:
         ds, n, held = self.ds, self.n, self.held_out
-        ed, sims = {}, {}
+        ed, sims, reals = {}, {}, {}
         with torch.no_grad(), seeded(self.seed):
             for c in self.watched + held:
                 sims[c] = ds.simulated(system, c, n).cpu()
-                ed[c] = float(energy_distance(ds.normalized(c, n), sims[c]))
+                reals[c] = ds.normalized(c, n)
+                ed[c] = float(energy_distance(reals[c], sims[c]))
         control_mean = sims["control"].mean(dim=0)
         model_shift = {c: sims[c].mean(dim=0) - control_mean for c in held}
 
@@ -117,17 +116,14 @@ class Evaluator:
         self.log.figure(
             "held_out/energy", plots.condition_bars(bars, "held-out doubles"), step
         )
-        control_real = ds.normalized("control", n)
         for c in held[: self.n_plots]:
             shifts = {"model": model_shift[c], "additive": self.additive_shift[c]}
             self.log.figure(
                 f"shift/{c}", plots.shift_scatter(shifts, self.real_shift[c], c), step
             )
-            self.log.figure(
-                f"pca/{c}",
-                plots.pca_overlay(ds.normalized(c, n), sims[c], control_real, c),
-                step,
-            )
+            with seeded(self.seed):
+                pca = plots.pca_overlay(reals[c], sims[c], reals["control"], c)
+            self.log.figure(f"pca/{c}", pca, step)
         self.log.flush()
         system.save(self.log.dir / "system")
         print(

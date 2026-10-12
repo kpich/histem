@@ -72,20 +72,12 @@ class NBCountObserver(FrozenSpec):
         return log_size + b + state_features(pop, self.drivers) @ w.T
 
     def observe(self, pop: Population) -> torch.Tensor:
-        # torch's NB counts failures before total_count successes, so this
-        # parameterization has mean exp(log_mean) and inverse dispersion theta
-        logits = self.log_mean(pop) - math.log(self.dispersion)
-        nb = torch.distributions.NegativeBinomial(self.dispersion, logits=logits)
-        counts: torch.Tensor = nb.sample()
-        return counts
+        theta = torch.tensor(self.dispersion, device=pop.device)
+        return _nb_sample(self.log_mean(pop), theta)
 
     def rsample(self, pop: Population) -> torch.Tensor:
-        # NB = Poisson(Gamma): the gamma rate is reparameterized, the Poisson
-        # counts are exact with a straight-through gradient to the rate
-        mean = self.log_mean(pop).exp()
-        theta = torch.tensor(self.dispersion, device=mean.device)
-        rate = torch.distributions.Gamma(theta, theta / mean).rsample()
-        return rate + (torch.poisson(rate.detach()) - rate).detach()
+        theta = torch.tensor(self.dispersion, device=pop.device)
+        return _nb_rsample(self.log_mean(pop), theta)
 
 
 class _Decoder(nn.Module):
@@ -146,15 +138,22 @@ class DecoderObserver(FrozenSpec):
         return out
 
     def observe(self, pop: Population) -> torch.Tensor:
-        theta = self._net.log_dispersion.exp()
-        logits = self.log_mean(pop) - theta.log()
-        counts: torch.Tensor = torch.distributions.NegativeBinomial(
-            theta, logits=logits
-        ).sample()
-        return counts
+        return _nb_sample(self.log_mean(pop), self._net.log_dispersion.exp())
 
     def rsample(self, pop: Population) -> torch.Tensor:
-        mean = self.log_mean(pop).exp()
-        theta = self._net.log_dispersion.exp()
-        rate = torch.distributions.Gamma(theta, theta / mean).rsample()
-        return rate + (torch.poisson(rate.detach()) - rate).detach()
+        return _nb_rsample(self.log_mean(pop), self._net.log_dispersion.exp())
+
+
+def _nb_sample(log_mean: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+    # torch's NB counts failures before total_count successes, so this
+    # parameterization has mean exp(log_mean) and inverse dispersion theta
+    nb = torch.distributions.NegativeBinomial(theta, logits=log_mean - theta.log())
+    counts: torch.Tensor = nb.sample()
+    return counts
+
+
+def _nb_rsample(log_mean: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
+    # NB = Poisson(Gamma): the gamma rate is reparameterized, the Poisson
+    # counts are exact with a straight-through gradient to the rate
+    rate = torch.distributions.Gamma(theta, theta / log_mean.exp()).rsample()
+    return rate + (torch.poisson(rate.detach()) - rate).detach()

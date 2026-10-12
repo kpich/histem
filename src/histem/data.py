@@ -95,9 +95,9 @@ class CountsDataset(FrozenSpec):
         if unknown := set(held_out) - set(self.interventions):
             raise KeyError(f"unknown conditions: {sorted(unknown)}")
         keep = [c for c in self.interventions if c not in held_out]
-        return self.subset("train", keep), self.subset("test", held_out)
+        return self._subset("train", keep), self._subset("test", held_out)
 
-    def subset(self, suffix: str, conditions: list[str]) -> Self:
+    def _subset(self, suffix: str, conditions: list[str]) -> Self:
         totals = None if self.totals is None else _pick(self.totals, conditions)
         return self.model_copy(
             update={
