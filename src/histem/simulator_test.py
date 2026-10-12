@@ -2,24 +2,46 @@ import pytest
 import torch
 from pydantic import ValidationError
 
-from histem.models.logic import LogicDynamics
+from histem.dynamics import Inputs, Intervention
 from histem.simulator import Signaling, knn_graph, simulate
-from histem.state import Slot, StateSchema
+from histem.spec import FrozenSpec
+from histem.state import Population, Slot, StateSchema
+
+SCHEMA = StateSchema(slots=(Slot(name="s", variables=("src", "rcv")),))
+
+
+class Relay(FrozenSpec):
+    """`src` cells secrete L; `rcv` turns on where L arrives."""
+
+    @property
+    def state_schema(self) -> StateSchema:
+        return SCHEMA
+
+    @property
+    def signal_names(self) -> tuple[str, ...]:
+        return ("L",)
+
+    def step(self, pop: Population, inputs: Inputs) -> Population:
+        out = pop.copy()
+        out.values["s"][:, 1] = (inputs.signals[:, 0] >= 0.5).to(torch.int8)
+        return out
+
+    def emit_signals(self, pop: Population) -> torch.Tensor:
+        return pop.get("src").float().unsqueeze(1)
+
+    def intervene(self, intervention: Intervention) -> "Relay":
+        return self
+
+    def description_length(self) -> float:
+        return 0.0
 
 
 def test_paracrine_signal_reaches_neighbors() -> None:
-    schema = StateSchema(slots=(Slot(name="s", variables=("src", "rcv")),))
-    dyn = LogicDynamics(
-        state_schema=schema,
-        rules={"rcv": "in_L >= 0.5"},
-        signal_rules={"L": "1.0 if src >= 1 else 0.0"},
-        default_rate=1.0,
-    )
-    pop = schema.empty(3)
+    pop = SCHEMA.empty(3)
     pop.values["s"][0, 0] = 1  # only cell 0 secretes
     positions = torch.tensor([[0.0], [1.0], [10.0]])
     sig = Signaling(autocrine=0.0, paracrine=1.0, neighbors=knn_graph(positions, k=1))
-    out, _ = simulate(dyn, pop, 1, signaling=sig)
+    out, _ = simulate(Relay(), pop, 1, signaling=sig)
     assert out.get("rcv").tolist() == [0, 1, 0]  # cell 1's nearest neighbor is cell 0
 
 

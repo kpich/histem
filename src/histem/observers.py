@@ -30,12 +30,11 @@ class Observer(Protocol):
 
 
 def state_features(pop: Population, variables: tuple[str, ...]) -> torch.Tensor:
-    """(n, k) features: discrete scaled to [0, 1], continuous passed through."""
+    """(n, k) features, each divided by its slot's levels - 1."""
     cols = []
     for v in variables:
         slot = pop.schema.slot(pop.schema.locate(v)[0])
-        x = pop.get(v).float()
-        cols.append(x / (slot.levels - 1) if slot.kind == "discrete" else x)
+        cols.append(pop.get(v).float() / (slot.levels - 1))
     return torch.stack(cols, dim=1)
 
 
@@ -81,12 +80,12 @@ class NBCountObserver(FrozenSpec):
         return counts
 
     def rsample(self, pop: Population) -> torch.Tensor:
-        # NB = Poisson(Gamma): the gamma rate is reparameterized, the Poisson step
-        # is replaced by a moment-matched normal
+        # NB = Poisson(Gamma): the gamma rate is reparameterized, the Poisson
+        # counts are exact with a straight-through gradient to the rate
         mean = self.log_mean(pop).exp()
         theta = torch.tensor(self.dispersion, device=mean.device)
         rate = torch.distributions.Gamma(theta, theta / mean).rsample()
-        return (rate + rate.sqrt() * torch.randn_like(rate)).clamp(min=0)
+        return rate + (torch.poisson(rate.detach()) - rate).detach()
 
     def description_length(self) -> float:
         return float(torch.count_nonzero(self.weights) + self.bias.numel()) * 8.0

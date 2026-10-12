@@ -31,14 +31,28 @@ class CellSystem(FrozenSpec):
     observers: dict[str, Tagged[Observer]]
     init: Tagged[Init] = Field(default_factory=UniformInit)
     burn_in: int = Field(50, ge=0)
+    # under autograd, backprop through only the last `grad_steps` of burn-in
+    grad_steps: int | None = Field(None, ge=0)
     signaling: Signaling = Field(default_factory=Signaling)
     device: str = "cpu"
 
     def sample_cells(self, n: int, intervention: Intervention = CONTROL) -> Population:
+        pop = self.init.sample(self.dynamics.state_schema, n, self.device)
+        tracked = self.burn_in
+        if self.grad_steps is not None and torch.is_grad_enabled():
+            tracked = min(self.grad_steps, self.burn_in)
+            with torch.no_grad():
+                pop, _ = simulate(
+                    self.dynamics,
+                    pop,
+                    self.burn_in - tracked,
+                    intervention=intervention,
+                    signaling=self.signaling,
+                )
         pop, _ = simulate(
             self.dynamics,
-            self.init.sample(self.dynamics.state_schema, n, self.device),
-            self.burn_in,
+            pop,
+            tracked,
             intervention=intervention,
             signaling=self.signaling,
         )

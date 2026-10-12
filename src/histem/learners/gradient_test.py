@@ -14,7 +14,9 @@ def _suite() -> Suite:
 
 def test_updates_parameters_in_place() -> None:
     torch.manual_seed(0)
-    system = synthetic.make_neural_system(hidden=8).model_copy(update={"burn_in": 2})
+    system = synthetic.make_kernel_system(width=16, layers=1).model_copy(
+        update={"burn_in": 2}
+    )
     before = [p.detach().clone() for p in system.parameters()]
     log = gradient_fit(system, _suite(), 2)
     assert len(log.losses) == 2

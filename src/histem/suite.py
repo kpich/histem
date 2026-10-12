@@ -26,6 +26,8 @@ class Suite(Spec):
     weights: dict[str, float] = Field(default_factory=dict)
     complexity_weight: float = Field(1e-3, ge=0)
     cells_per_condition: int = Field(300, gt=0)
+    # `loss` uses this many random conditions per dataset; None means all
+    loss_conditions: int | None = Field(None, gt=0)
     # same seed for every candidate, so score differences aren't sampling noise
     seed: int = 0
 
@@ -40,13 +42,22 @@ class Suite(Spec):
             raise ValueError("suite has no datasets")
         per_ds = {
             ds.name: torch.stack(
-                [ds.loss(system, c, self.cells_per_condition) for c in ds.conditions]
+                [
+                    ds.loss(system, c, self.cells_per_condition)
+                    for c in self._pick_conditions(ds.conditions)
+                ]
             ).mean()
             for ds in self.datasets
         }
         w = {k: self.weights.get(k, 1.0) for k in per_ds}
         total = torch.stack([w[k] * v for k, v in per_ds.items()]).sum()
         return total / sum(w.values())
+
+    def _pick_conditions(self, conditions: list[str]) -> list[str]:
+        if self.loss_conditions is None or self.loss_conditions >= len(conditions):
+            return conditions
+        idx = torch.randperm(len(conditions))[: self.loss_conditions]
+        return [conditions[i] for i in idx.tolist()]
 
     def evaluate(self, system: CellSystem) -> Scores:
         fit = {}

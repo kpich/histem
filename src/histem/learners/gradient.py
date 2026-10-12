@@ -16,9 +16,11 @@ def gradient_fit(
     steps: int,
     *,
     lr: float = 1e-2,
+    clip: float | None = 1.0,
     verbose: bool = False,
 ) -> FitLog:
-    """Adam on `suite.loss`. Updates the system's parameters in place."""
+    """Adam on `suite.loss`, with the gradient norm clipped to `clip`. Updates the
+    system's parameters in place."""
     params = list(system.parameters())
     if not params:
         raise ValueError("system has no learnable parameters")
@@ -28,6 +30,8 @@ def gradient_fit(
         opt.zero_grad()
         loss = suite.loss(system)
         loss.backward()
+        if clip is not None:
+            torch.nn.utils.clip_grad_norm_(params, clip)
         opt.step()
         log.losses.append(loss.item())
         if verbose and (it % 10 == 0 or it == steps):

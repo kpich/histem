@@ -1,15 +1,16 @@
 """Toy ground truth: GATA1/PU1 fork, chromatin gates, MYC/mito loop, IL signal."""
 
 import torch
+from pydantic import Field
 
 from histem.data import CountsDataset
-from histem.dynamics import CONTROL, Intervention
-from histem.models.logic import LogicDynamics
-from histem.models.neural import NeuralDynamics
+from histem.dynamics import CONTROL, Inputs, Intervention
+from histem.models.diffusion import DiffusionKernel
 from histem.observers import NBCountObserver
 from histem.rng import seeded
 from histem.simulator import Signaling
-from histem.state import Slot, StateSchema
+from histem.spec import FrozenSpec
+from histem.state import Population, Slot, StateSchema
 from histem.system import CellSystem
 
 TFS = ("GATA1", "PU1", "FLI1", "KLF1", "CEBPA", "MYC")
@@ -22,21 +23,66 @@ SCHEMA = StateSchema(
     )
 )
 
-PROGRAM = """
-GATA1 <- 2 if acc_GATA1 >= 1 and (GATA1 >= 1 or FLI1 >= 1) and not PU1 >= 2 else 0
-PU1 <- 2 if (PU1 >= 1 or CEBPA >= 1) and not GATA1 >= 2 else 0
-FLI1 <- 2 if GATA1 >= 1 and not KLF1 >= 1 else 0
-KLF1 <- 2 if GATA1 >= 2 and not FLI1 >= 2 else 0
-CEBPA <- 2 if acc_CEBPA >= 1 and PU1 >= 1 else 0
-MYC <- 2 if mito_cn >= 1 and not (KLF1 >= 2 or CEBPA >= 2) else 1
-mito_cn <- 2 if MYC >= 2 else 1
-acc_GATA1 <- not CEBPA >= 2
-acc_CEBPA <- in_IL >= 0.5 or acc_CEBPA >= 1
-emit IL <- 1.0 if PU1 >= 2 else 0.0
-rate acc_GATA1 = 0.05
-rate acc_CEBPA = 0.05
-rate mito_cn = 0.1
-"""
+
+class ForkProgram(FrozenSpec):
+    """Asynchronous multi-valued logic. Each step, each variable fires with
+    probability `rates` and moves one level toward its target.
+    """
+
+    rates: dict[str, float] = Field(
+        default_factory=lambda: {"acc_GATA1": 0.05, "acc_CEBPA": 0.05, "mito_cn": 0.1}
+    )
+    default_rate: float = 0.5
+
+    @property
+    def state_schema(self) -> StateSchema:
+        return SCHEMA
+
+    @property
+    def signal_names(self) -> tuple[str, ...]:
+        return ("IL",)
+
+    def targets(
+        self, v: dict[str, torch.Tensor], il: torch.Tensor
+    ) -> dict[str, torch.Tensor]:
+        on = {
+            "GATA1": (v["acc_GATA1"] >= 1)
+            & ((v["GATA1"] >= 1) | (v["FLI1"] >= 1))
+            & (v["PU1"] < 2),
+            "PU1": ((v["PU1"] >= 1) | (v["CEBPA"] >= 1)) & (v["GATA1"] < 2),
+            "FLI1": (v["GATA1"] >= 1) & (v["KLF1"] < 1),
+            "KLF1": (v["GATA1"] >= 2) & (v["FLI1"] < 2),
+            "CEBPA": (v["acc_CEBPA"] >= 1) & (v["PU1"] >= 1),
+        }
+        out = {k: 2.0 * c for k, c in on.items()}
+        myc_high = (v["mito_cn"] >= 1) & (v["KLF1"] < 2) & (v["CEBPA"] < 2)
+        out["MYC"] = 1.0 + myc_high.float()
+        out["mito_cn"] = 1.0 + (v["MYC"] >= 2).float()
+        out["acc_GATA1"] = (v["CEBPA"] < 2).float()
+        out["acc_CEBPA"] = ((v["acc_CEBPA"] >= 1) | (il >= 0.5)).float()
+        return out
+
+    def step(self, pop: Population, inputs: Inputs) -> Population:
+        x = pop.flat()
+        v = dict(zip(SCHEMA.variables, x.unbind(1), strict=True))
+        targets = self.targets(v, inputs.signals[:, 0])
+        target = torch.stack([targets[name] for name in SCHEMA.variables], 1)
+        rate = torch.tensor(
+            [self.rates.get(name, self.default_rate) for name in SCHEMA.variables],
+            device=x.device,
+        )
+        fire = torch.rand_like(x) < rate
+        return pop.with_flat(torch.where(fire, x + torch.sign(target - x), x))
+
+    def emit_signals(self, pop: Population) -> torch.Tensor:
+        return (pop.get("PU1") >= 2).float().unsqueeze(1)
+
+    def intervene(self, intervention: Intervention) -> "ForkProgram":
+        return self
+
+    def description_length(self) -> float:
+        return 0.0
+
 
 DRIVERS = (*TFS, "mito_cn")
 
@@ -69,38 +115,34 @@ def make_observer(
     )
 
 
-def make_system(program: str = PROGRAM) -> CellSystem:
+def make_system(program: ForkProgram | None = None) -> CellSystem:
     return CellSystem(
-        dynamics=LogicDynamics.from_text(SCHEMA, program),
+        dynamics=program or ForkProgram(),
         observers={"rna": make_observer()},
         burn_in=60,
         signaling=Signaling(autocrine=0.5, endocrine=0.5),
     )
 
 
-# continuous drivers in level units (so clamps mean the same thing) plus latents
-NEURAL_SCHEMA = StateSchema(
-    slots=(
-        Slot(name="drivers", variables=DRIVERS, kind="continuous"),
-        Slot(
-            name="latent", variables=tuple(f"h{i}" for i in range(4)), kind="continuous"
-        ),
+def make_kernel_system(
+    width: int = 64,
+    layers: int = 2,
+    rounds: int = 3,
+    grad_steps: int | None = 10,
+    device: str = "cpu",
+) -> CellSystem:
+    """A DiffusionKernel on the relaxed schema, under the true observer."""
+    kernel = DiffusionKernel(
+        state_schema=SCHEMA.relaxed(),
+        signals=("IL",),
+        width=width,
+        layers=layers,
+        rounds=rounds,
     )
-)
-
-
-def make_neural_system(hidden: int = 64, device: str = "cpu") -> CellSystem:
-    """Learnable dynamics under the true observer, rescaled from [0, 1] features to
-    level units."""
-    obs = make_observer()
-    return CellSystem(
-        dynamics=NeuralDynamics(
-            state_schema=NEURAL_SCHEMA, signals=("IL",), hidden=hidden
-        ),
-        observers={"rna": obs.model_copy(update={"weights": obs.weights / 2})},
-        burn_in=30,
-        signaling=Signaling(autocrine=0.5, endocrine=0.5),
-    ).to(device)
+    system = make_system().model_copy(
+        update={"dynamics": kernel, "grad_steps": grad_steps}
+    )
+    return system.to(device)
 
 
 def perturbations() -> dict[str, Intervention]:
