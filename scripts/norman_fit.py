@@ -41,6 +41,7 @@ def _args() -> argparse.Namespace:
     ap.add_argument("--width", type=int, default=64)
     ap.add_argument("--layers", type=int, default=2)
     ap.add_argument("--gene-dim", type=int, default=128)
+    ap.add_argument("--rank", type=int, default=16)
     ap.add_argument("--tau", type=float, default=2.0)
     ap.add_argument("--burn-in", type=int, default=20)
     ap.add_argument("--grad-steps", type=int, default=10)
@@ -227,6 +228,7 @@ def main() -> None:
             width=args.width,
             layers=args.layers,
             gene_dim=args.gene_dim,
+            rank=args.rank,
             tau=args.tau,
             burn_in=args.burn_in,
             grad_steps=args.grad_steps,
