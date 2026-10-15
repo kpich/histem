@@ -21,7 +21,7 @@ class _Net(nn.Module):
         self.rate = nn.Parameter(torch.zeros(()))  # sigmoid 0.5
 
     def forward(self, a: torch.Tensor, table: torch.Tensor, cap: float) -> torch.Tensor:
-        h = (a @ self.source(table)) @ self.sink(table).T
+        h = (a @ self.source(table)) @ self.sink(table).T / table.shape[0] ** 0.5
         rate = torch.sigmoid(self.rate)
         out: torch.Tensor = (1 - rate) * a + rate * cap * torch.tanh(h / cap)
         return out
@@ -30,7 +30,8 @@ class _Net(nn.Module):
 class Regulate(FrozenSpec):
     """A mechanism that relaxes each gene's activity in `slot` toward a saturating
     function of every gene's activity, through a rank-`rank` coupling built from the
-    gene table: gene j drives gene g by source(j) · sink(g). Run it before `Perturb`
+    gene table: gene j drives gene g by source(j) · sink(g), summed over genes and
+    scaled by 1/sqrt(number of genes). Run it before `Perturb`
     so the targets stay held."""
 
     slot: Slot
