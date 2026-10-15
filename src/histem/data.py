@@ -39,6 +39,8 @@ class CountsDataset(FrozenSpec):
     shared features."""
 
     name: str
+    # what the cells share, e.g. cell type and assay; split halves keep it
+    context: str
     features: tuple[str, ...]
     counts: dict[str, Tensor]  # condition -> (n_cells, n_features)
     interventions: dict[str, Intervention]
@@ -101,6 +103,7 @@ class CountsDataset(FrozenSpec):
         """n log-normalized simulated cells, over the observer's features."""
         sim = system.sample(
             n,
+            self.context,
             self.interventions[condition],
             self.modality,
             reparam=torch.is_grad_enabled(),
@@ -145,6 +148,7 @@ def from_anndata(
         counts[c] = torch.as_tensor(sub[rows].toarray(), dtype=torch.float32)
     return CountsDataset(
         name=name,
+        context=name,
         features=tuple(names[i] for i in cols),
         counts=counts,
         interventions=interventions,

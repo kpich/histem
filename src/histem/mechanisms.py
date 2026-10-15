@@ -82,7 +82,7 @@ class Composite(FrozenSpec):
             k = len(m.signals) if isinstance(m, Emits) else 0
             received = inputs.signals[:, offset : offset + k]
             offset += k
-            written = m.step(pop, Inputs(received, inputs.intervention))
+            written = m.step(pop, Inputs(received, inputs.intervention, inputs.context))
             pop = Population(self._schema, pop.values | written)
         return pop
 

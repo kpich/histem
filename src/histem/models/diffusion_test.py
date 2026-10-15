@@ -5,7 +5,7 @@ from histem.system import CellSystem
 
 
 def test_discrete_steps_stay_on_each_variables_levels(system: CellSystem) -> None:
-    pop = system.sample_cells(200)
+    pop = system.sample_cells(200, "tiny")
     for slot in pop.schema.slots:
         if slot.levels is None:
             continue
@@ -17,4 +17,6 @@ def test_discrete_steps_stay_on_each_variables_levels(system: CellSystem) -> Non
 
 def test_unknown_gene_rejected(system: CellSystem) -> None:
     with pytest.raises(KeyError, match="unknown genes"):
-        system.sample_cells(2, Intervention(name="Z", genes=("Z",), kind="activate"))
+        system.sample_cells(
+            2, "tiny", Intervention(name="Z", genes=("Z",), kind="activate")
+        )

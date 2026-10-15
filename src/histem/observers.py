@@ -21,11 +21,11 @@ class Observer(Protocol):
         """Names of the observed columns, e.g. genes."""
         ...
 
-    def observe(self, pop: Population) -> torch.Tensor:
+    def observe(self, pop: Population, context: str) -> torch.Tensor:
         """(n_cells, n_features)"""
         ...
 
-    def rsample(self, pop: Population) -> torch.Tensor:
+    def rsample(self, pop: Population, context: str) -> torch.Tensor:
         """A reparameterized stand-in for `observe`, for gradient training."""
         ...
 
@@ -40,30 +40,43 @@ def state_features(pop: Population, variables: tuple[str, ...]) -> torch.Tensor:
 
 
 class _Decoder(nn.Module):
-    def __init__(self, n_drivers: int, n_genes: int, width: int, gene_dim: int):
+    def __init__(
+        self,
+        n_drivers: int,
+        n_genes: int,
+        contexts: tuple[str, ...],
+        width: int,
+        gene_dim: int,
+    ):
         super().__init__()
         self.hidden = nn.Sequential(nn.Linear(n_drivers, width), nn.SiLU())
         # a gene's output weights are a projection of its table vector
         self.out = nn.Linear(gene_dim, width, bias=False)
         nn.init.zeros_(self.out.weight)
-        self.bias = nn.Parameter(torch.zeros(n_genes))
+        self.bias = nn.ParameterDict(
+            {c: nn.Parameter(torch.zeros(n_genes)) for c in contexts}
+        )
         self.log_dispersion = nn.Parameter(torch.full((n_genes,), math.log(5.0)))
 
-    def forward(self, features: torch.Tensor, genes: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, features: torch.Tensor, genes: torch.Tensor, context: str
+    ) -> torch.Tensor:
         """`genes` (n_genes, gene_dim) are the observed genes' table vectors."""
-        out: torch.Tensor = self.bias + self.hidden(features) @ self.out(genes).T
+        bias = self.bias[context]
+        out: torch.Tensor = bias + self.hidden(features) @ self.out(genes).T
         return out
 
 
 class DecoderObserver(FrozenSpec):
-    """log mean_g = log(size) + bias_g + MLP(features(state)) . W e_g + a_g, where
-    e_g is gene g's vector in the bound `GeneTable` and a_g is gene g's value in
-    the continuous `activity` slot (0 without one), with a learned per-gene NB
-    dispersion. W starts at zero, so set `bias` to the data's log mean counts to
-    start at the right scale."""
+    """log mean_g = log(size) + bias_cg + MLP(features(state)) . W e_g + a_g, where
+    c is the context, e_g is gene g's vector in the bound `GeneTable` and a_g is
+    gene g's value in the continuous `activity` slot (0 without one), with a learned
+    per-gene NB dispersion. W starts at zero, so set each context's bias to its
+    data's log mean counts to start at the right scale."""
 
     genes: tuple[str, ...] = Field(min_length=1)
     drivers: tuple[str, ...] = Field(min_length=1)
+    contexts: tuple[str, ...] = Field(min_length=1)
     activity: str | None = None  # slot of per-gene log fold activity
     width: int = Field(128, gt=0)
     gene_dim: int = Field(128, gt=0)  # the bound GeneTable's dim
@@ -80,7 +93,7 @@ class DecoderObserver(FrozenSpec):
         if len(set(self.genes)) != len(self.genes):
             raise ValueError("duplicate gene names")
         self._net = _Decoder(
-            len(self.drivers), len(self.genes), self.width, self.gene_dim
+            len(self.drivers), len(self.genes), self.contexts, self.width, self.gene_dim
         )
         if self.weights:
             self._net.load_state_dict(self.weights, assign=True)
@@ -100,17 +113,27 @@ class DecoderObserver(FrozenSpec):
             raise ValueError(f"gene table dim {table.dim} != gene_dim {self.gene_dim}")
         self._genes = table
 
-    def set_bias(self, bias: torch.Tensor) -> None:
-        with torch.no_grad():
-            self._net.bias.copy_(bias)
+    def gene_rows(self) -> dict[str, tuple[str, ...]]:
+        """Parameters whose rows are genes, and which genes."""
+        names = [f"bias.{c}" for c in self.contexts] + ["log_dispersion"]
+        return dict.fromkeys(names, self.genes)
 
-    def log_mean(self, pop: Population) -> torch.Tensor:
+    def set_bias(
+        self, context: str, genes: tuple[str, ...], bias: torch.Tensor
+    ) -> None:
+        """Set `context`'s bias for `genes`; other genes keep theirs."""
+        where = {g: i for i, g in enumerate(self.genes)}
+        idx = torch.tensor([where[g] for g in genes])
+        with torch.no_grad():
+            self._net.bias[context][idx] = bias.to(self._net.bias[context])
+
+    def log_mean(self, pop: Population, context: str) -> torch.Tensor:
         log_size = self.size_sd * torch.randn((pop.n, 1), device=pop.device)
         if self._genes is None:
             raise RuntimeError("no gene table bound")
         features = state_features(pop, self.drivers)
         out: torch.Tensor = log_size + self._net(
-            features, self._genes.embed(self.genes)
+            features, self._genes.embed(self.genes), context
         )
         if self.activity is not None:
             out = out + self._activity(pop)
@@ -127,11 +150,11 @@ class DecoderObserver(FrozenSpec):
         out[:, cols] = values[:, src]
         return out
 
-    def observe(self, pop: Population) -> torch.Tensor:
-        return _nb_sample(self.log_mean(pop), self._net.log_dispersion.exp())
+    def observe(self, pop: Population, context: str) -> torch.Tensor:
+        return _nb_sample(self.log_mean(pop, context), self._net.log_dispersion.exp())
 
-    def rsample(self, pop: Population) -> torch.Tensor:
-        return _nb_rsample(self.log_mean(pop), self._net.log_dispersion.exp())
+    def rsample(self, pop: Population, context: str) -> torch.Tensor:
+        return _nb_rsample(self.log_mean(pop, context), self._net.log_dispersion.exp())
 
 
 def _nb_sample(log_mean: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:

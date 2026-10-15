@@ -27,7 +27,7 @@ def test_fit_on_singles_and_score_a_held_out_double() -> None:
     held_out = combo_split(ds, frac=1.0)
     assert held_out == ["A_B"]
     train, test = ds.split(held_out)
-    system = make_system(ds, latents=3, levels=3, width=16, layers=1, burn_in=3)
+    system = make_system([ds], latents=3, levels=3, width=16, layers=1, steps=3)
     gradient_fit(system, Suite(datasets=[train], cells_per_condition=5), 2)
 
     scores = Suite(datasets=[train, test], cells_per_condition=5).evaluate(system)
