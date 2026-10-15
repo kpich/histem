@@ -23,6 +23,11 @@ class UniformInit(FrozenSpec):
 
 
 @runtime_checkable
+class HasParts(Protocol):
+    def parts(self) -> dict[str, object]: ...
+
+
+@runtime_checkable
 class Learnable(Protocol):
     def named_parameters(self) -> Iterator[tuple[str, torch.Tensor]]: ...
 
@@ -51,7 +56,7 @@ class CellSystem(FrozenSpec):
     def _parts(self) -> dict[str, object]:
         parts = {"dynamics": self.dynamics, "init": self.init, "genes": self.genes}
         parts |= {f"observers/{k}": v for k, v in self.observers.items()}
-        return parts
+        return _flatten(parts)
 
     def sample_cells(self, n: int, intervention: Intervention = CONTROL) -> Population:
         pop = self.init.sample(self.dynamics.state_schema, n, self.device)
@@ -103,3 +108,13 @@ class CellSystem(FrozenSpec):
         config["device"] = device
         moved = {k: v.to(device) for k, v in tensors.items()}
         return self.model_validate(config, context={"tensors": moved})
+
+
+def _flatten(parts: dict[str, object]) -> dict[str, object]:
+    """Parts and, recursively, their sub-parts as `<part>/<sub-part>`."""
+    out = dict(parts)
+    for prefix, part in parts.items():
+        if isinstance(part, HasParts):
+            sub = _flatten(part.parts())
+            out |= {f"{prefix}/{k}": v for k, v in sub.items()}
+    return out

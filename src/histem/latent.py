@@ -1,5 +1,6 @@
 from histem.data import CountsDataset
 from histem.genes import GeneTable
+from histem.mechanisms import Composite
 from histem.models.diffusion import DiffusionKernel
 from histem.observers import DecoderObserver
 from histem.state import latent_schema
@@ -27,7 +28,7 @@ def make_system(
     targets = {g for iv in ds.interventions.values() for g in iv.genes}
     genes = GeneTable(genes=tuple(sorted(targets | set(ds.features))), dim=gene_dim)
     kernel = DiffusionKernel(
-        state_schema=schema,
+        slots=schema.slots,
         gene_dim=gene_dim,
         width=width,
         layers=layers,
@@ -42,7 +43,7 @@ def make_system(
     )
     observer.set_bias(ds.counts["control"].mean(dim=0).clamp(min=1e-3).log())
     system = CellSystem(
-        dynamics=kernel,
+        dynamics=Composite(mechanisms={"latent": kernel}),
         observers={ds.modality: observer},
         genes=genes,
         burn_in=burn_in,

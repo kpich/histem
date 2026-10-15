@@ -7,6 +7,7 @@ from histem.system import CellSystem
 def test_steps_stay_on_each_variables_levels(system: CellSystem) -> None:
     pop = system.sample_cells(200)
     for slot in pop.schema.slots:
+        assert slot.levels is not None
         v = pop.values[slot.name]
         assert (v == v.round()).all()
         assert v.min() >= 0

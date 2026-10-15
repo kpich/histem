@@ -31,11 +31,11 @@ class Observer(Protocol):
 
 
 def state_features(pop: Population, variables: tuple[str, ...]) -> torch.Tensor:
-    """(n, k) features, each divided by its slot's levels - 1."""
+    """(n, k) features, discrete ones divided by their slot's levels - 1."""
     cols = []
     for v in variables:
-        slot = pop.schema.slot(pop.schema.locate(v)[0])
-        cols.append(pop.get(v) / (slot.levels - 1))
+        levels = pop.schema.slot(pop.schema.locate(v)[0]).levels
+        cols.append(pop.get(v) if levels is None else pop.get(v) / (levels - 1))
     return torch.stack(cols, dim=1)
 
 

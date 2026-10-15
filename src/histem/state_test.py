@@ -35,3 +35,15 @@ def test_locate_and_get() -> None:
     pop = schema.empty(4)
     pop.values["b"][:, 1] = 2
     assert pop.get("z").tolist() == [2, 2, 2, 2]
+
+
+def test_continuous_slots_start_at_zero() -> None:
+    schema = StateSchema(
+        slots=(
+            Slot(name="a", variables=("x",), levels=None),
+            Slot(name="b", variables=("y",)),
+        )
+    )
+    pop = schema.uniform(100)
+    assert pop.values["a"].abs().sum() == 0
+    assert set(pop.values["b"].flatten().tolist()) == {0.0, 1.0}

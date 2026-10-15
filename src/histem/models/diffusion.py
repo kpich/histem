@@ -1,4 +1,5 @@
-"""A learned transition kernel: masked discrete diffusion over a cell's next state.
+"""A learned transition kernel: masked discrete diffusion over the next values of
+some discrete slots of a cell's state.
 
 Each state variable, each received signal and each perturbed gene is a token; a
 perturbed gene's token is its vector in the system's `GeneTable` plus a learned
@@ -22,7 +23,7 @@ from torch import nn
 from histem.dynamics import KINDS, Inputs
 from histem.genes import GeneTable
 from histem.spec import FrozenSpec, Tensor
-from histem.state import Population, StateSchema
+from histem.state import Population, Slot
 
 
 class _Net(nn.Module):
@@ -79,7 +80,9 @@ class _Net(nn.Module):
 
 
 class DiffusionKernel(FrozenSpec):
-    state_schema: StateSchema
+    """A mechanism that reads and writes `slots`."""
+
+    slots: tuple[Slot, ...] = Field(min_length=1)
     signals: tuple[str, ...] = ()
     gene_dim: int = Field(128, gt=0)  # the bound GeneTable's dim
     width: int = Field(64, gt=0)
@@ -96,7 +99,9 @@ class DiffusionKernel(FrozenSpec):
 
     @model_validator(mode="after")
     def _build(self) -> Self:
-        per_var = [s.levels for s in self.state_schema.slots for _ in s.variables]
+        if any(s.levels is None for s in self.slots):
+            raise ValueError("diffusion slots must be discrete")
+        per_var = [s.levels or 0 for s in self.slots for _ in s.variables]
         self._invalid = torch.arange(max(per_var)) >= torch.tensor(per_var)[:, None]
         self._net = _Net(
             len(per_var),
@@ -117,6 +122,17 @@ class DiffusionKernel(FrozenSpec):
     def levels(self) -> int:
         return int(self._invalid.shape[1])
 
+    @property
+    def writes(self) -> tuple[Slot, ...]:
+        return self.slots
+
+    @property
+    def reads(self) -> tuple[str, ...]:
+        return tuple(s.name for s in self.slots)
+
+    def _flat(self, pop: Population) -> torch.Tensor:
+        return torch.cat([pop.values[s.name] for s in self.slots], dim=1)
+
     def named_parameters(self) -> Iterator[tuple[str, torch.Tensor]]:
         return iter(self.weights.items())
 
@@ -136,8 +152,8 @@ class DiffusionKernel(FrozenSpec):
         logits: torch.Tensor = self._net(partial, x, received, genes, kind)
         return logits.masked_fill(self._invalid.to(logits.device), float("-inf"))
 
-    def step(self, pop: Population, inputs: Inputs) -> Population:
-        x = pop.flat()
+    def step(self, pop: Population, inputs: Inputs) -> dict[str, torch.Tensor]:
+        x = self._flat(pop)
         n, v = x.shape
         iv = inputs.intervention
         genes, kind = x.new_zeros(0, self.gene_dim), 0
@@ -157,9 +173,10 @@ class DiffusionKernel(FrozenSpec):
             drawn = torch.cat([drawn, drawn.new_zeros(n, v, 1)], dim=-1)
             partial = torch.where(reveal, drawn, partial)
         grid = torch.arange(self.levels, device=x.device, dtype=x.dtype)
-        return pop.with_flat(partial[..., :-1] @ grid)
+        nxt = (partial[..., :-1] @ grid).split([s.dim for s in self.slots], dim=1)
+        return {s.name: v for s, v in zip(self.slots, nxt, strict=True)}
 
     def emit_signals(self, pop: Population) -> torch.Tensor:
         if self._net.emit is None:
             return torch.zeros((pop.n, 0), device=pop.device)
-        return nn.functional.softplus(self._net.emit(pop.flat()))
+        return nn.functional.softplus(self._net.emit(self._flat(pop)))

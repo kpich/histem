@@ -263,17 +263,17 @@ def _mean(d: dict[str, float], conditions: list[str]) -> float:
 
 
 def _group_norms(norms: dict[str, float]) -> dict[str, float]:
-    """Pre-clip grad norms of the kernel, decoder, dispersion and gene table."""
+    """Pre-clip grad norms of each mechanism, decoder, dispersion and gene table."""
     squares: dict[str, float] = {}
     for name, v in norms.items():
         if name == "total":
             continue
         if name.endswith("log_dispersion"):
             group = "dispersion"
+        elif name.startswith("dynamics/"):
+            group = name.split("/")[1]  # the mechanism
         else:
-            group = {"dynamics": "kernel", "observers": "decoder"}.get(
-                name.split("/")[0], name.split("/")[0]
-            )
+            group = {"observers": "decoder"}.get(name.split("/")[0], name.split("/")[0])
         squares[group] = squares.get(group, 0.0) + v**2
     return {k: v**0.5 for k, v in squares.items()}
 
