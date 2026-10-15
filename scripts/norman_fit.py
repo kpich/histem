@@ -37,8 +37,7 @@ def _args() -> argparse.Namespace:
     ap.add_argument("--width", type=int, default=64)
     ap.add_argument("--layers", type=int, default=2)
     ap.add_argument("--gene-dim", type=int, default=128)
-    ap.add_argument("--tau", type=float, default=1.0)
-    ap.add_argument("--mean-weight", type=float, default=0.0)
+    ap.add_argument("--tau", type=float, default=2.0)
     ap.add_argument("--burn-in", type=int, default=20)
     ap.add_argument("--grad-steps", type=int, default=10)
     ap.add_argument("--device", default="mps")
@@ -160,7 +159,6 @@ def main() -> None:
     ds = norman.load(args.genes, args.max_cells)
     held_out = combo_split(ds, args.held_out_frac, args.seed)
     train, _ = ds.split(held_out)
-    train = train.model_copy(update={"mean_weight": args.mean_weight})
     fit_suite = Suite(
         datasets=[train],
         cells_per_condition=args.cells,
