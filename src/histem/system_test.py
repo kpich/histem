@@ -26,7 +26,7 @@ def test_save_load_round_trip(tmp_path: Path, system: CellSystem) -> None:
 def _tied(system: CellSystem) -> bool:
     table = system.genes
     assert isinstance(system.dynamics, Composite)
-    parts = [system.dynamics.mechanisms["latent"], system.observers["rna"]]
+    parts = [*system.dynamics.mechanisms.values(), system.observers["rna"]]
     return table is not None and all(p._genes is table for p in parts)  # type: ignore[attr-defined]
 
 
