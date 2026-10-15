@@ -1,4 +1,4 @@
-.PHONY: install install-precommit-hooks check lint format typecheck test int-test norman tb
+.PHONY: install install-precommit-hooks check lint format typecheck test int-test norman tb tb-all
 
 install:
 	uv sync
@@ -28,5 +28,9 @@ int-test:
 norman:
 	uv run scripts/norman_fit.py
 
-tb:
+N ?= 1
+tb:  # the N most recent runs
+	uv run tensorboard --logdir_spec "$$(ls -dt ../runs/2*/ | head -n $(N) | xargs -n1 basename | sed 's|.*|&:../runs/&|' | paste -sd, -)"
+
+tb-all:
 	uv run tensorboard --logdir ../runs
