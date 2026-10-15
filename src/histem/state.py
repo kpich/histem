@@ -10,8 +10,8 @@ from histem.spec import FrozenSpec
 class Slot(FrozenSpec):
     name: str
     variables: tuple[str, ...] = Field(min_length=1)
-    # values live on the grid 0..levels-1
-    levels: int = Field(2, ge=2)
+    # values live on the grid 0..levels-1, or anywhere if None (continuous)
+    levels: int | None = Field(2, ge=2)
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -64,11 +64,13 @@ class StateSchema(FrozenSpec):
         )
 
     def uniform(self, n: int, device: torch.device | str = "cpu") -> "Population":
-        """Every slot uniform over its integer levels."""
+        """Discrete slots uniform over their levels; continuous slots zero."""
         return Population(
             self,
             {
-                s.name: torch.randint(0, s.levels, (n, s.dim), device=device).float()
+                s.name: torch.zeros((n, s.dim), device=device)
+                if s.levels is None
+                else torch.randint(0, s.levels, (n, s.dim), device=device).float()
                 for s in self.slots
             },
         )
@@ -94,18 +96,6 @@ class Population:
     def get(self, variable: str) -> torch.Tensor:
         slot, i = self.schema.locate(variable)
         return self.values[slot][:, i]
-
-    def flat(self) -> torch.Tensor:
-        """(n, n_variables), in schema order."""
-        return torch.cat([self.values[s.name] for s in self.schema.slots], 1)
-
-    def with_flat(self, x: torch.Tensor) -> "Population":
-        dims = [s.dim for s in self.schema.slots]
-        values = {
-            s.name: part
-            for s, part in zip(self.schema.slots, x.split(dims, dim=1), strict=True)
-        }
-        return Population(self.schema, values)
 
     @property
     def device(self) -> torch.device:
