@@ -86,6 +86,7 @@ class DiffusionKernel(FrozenSpec):
     layers: int = Field(2, gt=0)
     heads: int = Field(4, gt=0)
     rounds: int = Field(3, gt=0)
+    tau: float = Field(1.0, gt=0)  # Gumbel-softmax temperature
     # empty means freshly initialized; afterwards it holds the live parameters
     weights: dict[str, Tensor] = Field(default_factory=dict)
 
@@ -152,7 +153,7 @@ class DiffusionKernel(FrozenSpec):
         for lo, hi in itertools.pairwise(bounds):
             reveal = ((order >= lo) & (order < hi)).unsqueeze(-1)
             logits = self._logits(partial, x, inputs.signals, genes, kind)
-            drawn = nn.functional.gumbel_softmax(logits, hard=True)
+            drawn = nn.functional.gumbel_softmax(logits, tau=self.tau, hard=True)
             drawn = torch.cat([drawn, drawn.new_zeros(n, v, 1)], dim=-1)
             partial = torch.where(reveal, drawn, partial)
         grid = torch.arange(self.levels, device=x.device, dtype=x.dtype)

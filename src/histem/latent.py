@@ -15,6 +15,7 @@ def make_system(
     layers: int = 2,
     decoder_width: int = 128,
     gene_dim: int = 128,
+    tau: float = 1.0,
     burn_in: int = 20,
     grad_steps: int | None = 10,
     device: str = "cpu",
@@ -26,7 +27,11 @@ def make_system(
     targets = {g for iv in ds.interventions.values() for g in iv.genes}
     genes = GeneTable(genes=tuple(sorted(targets | set(ds.features))), dim=gene_dim)
     kernel = DiffusionKernel(
-        state_schema=schema, gene_dim=gene_dim, width=width, layers=layers
+        state_schema=schema,
+        gene_dim=gene_dim,
+        width=width,
+        layers=layers,
+        tau=tau,
     )
     observer = DecoderObserver(
         genes=ds.features,
