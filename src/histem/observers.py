@@ -56,13 +56,15 @@ class _Decoder(nn.Module):
 
 
 class DecoderObserver(FrozenSpec):
-    """log mean_g = log(size) + bias_g + MLP(features(state)) . W e_g, where e_g is
-    gene g's vector in the bound `GeneTable`, with a learned per-gene NB
+    """log mean_g = log(size) + bias_g + MLP(features(state)) . W e_g + a_g, where
+    e_g is gene g's vector in the bound `GeneTable` and a_g is gene g's value in
+    the continuous `activity` slot (0 without one), with a learned per-gene NB
     dispersion. W starts at zero, so set `bias` to the data's log mean counts to
     start at the right scale."""
 
     genes: tuple[str, ...] = Field(min_length=1)
     drivers: tuple[str, ...] = Field(min_length=1)
+    activity: str | None = None  # slot of per-gene log fold activity
     width: int = Field(128, gt=0)
     gene_dim: int = Field(128, gt=0)  # the bound GeneTable's dim
     size_sd: float = Field(0.3, ge=0)  # sd of log library size
@@ -110,6 +112,19 @@ class DecoderObserver(FrozenSpec):
         out: torch.Tensor = log_size + self._net(
             features, self._genes.embed(self.genes)
         )
+        if self.activity is not None:
+            out = out + self._activity(pop)
+        return out
+
+    def _activity(self, pop: Population) -> torch.Tensor:
+        """(n, n_genes), zero for genes the slot lacks."""
+        assert self.activity is not None
+        values = pop.values[self.activity]
+        where = {g: i for i, g in enumerate(pop.schema.slot(self.activity).variables)}
+        cols = [i for i, g in enumerate(self.genes) if g in where]
+        src = torch.tensor([where[self.genes[i]] for i in cols], device=pop.device)
+        out = values.new_zeros(pop.n, len(self.genes))
+        out[:, cols] = values[:, src]
         return out
 
     def observe(self, pop: Population) -> torch.Tensor:
