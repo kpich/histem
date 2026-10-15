@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from histem.data import CountsDataset, Dataset, combo_split, from_anndata
 from histem.dynamics import CONTROL, Intervention
+from histem.rng import seeded
 from histem.system import CellSystem
 
 IVS = {"control": CONTROL, "ko": Intervention(name="ko")}
@@ -77,3 +78,11 @@ def test_loss_is_finite_scalar_on_a_batch(
     loss = ds.loss(system, "control", 8)
     assert loss.ndim == 0
     assert torch.isfinite(loss)
+
+
+def test_mean_weight_adds_mean_distance(ds: CountsDataset, system: CellSystem) -> None:
+    with seeded(0):
+        base = ds.loss(system, "control", 8)
+    with seeded(0):
+        weighted = ds.model_copy(update={"mean_weight": 1.0}).loss(system, "control", 8)
+    assert weighted > base
