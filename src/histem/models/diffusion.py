@@ -86,7 +86,7 @@ class DiffusionKernel(FrozenSpec):
     layers: int = Field(2, gt=0)
     heads: int = Field(4, gt=0)
     rounds: int = Field(3, gt=0)
-    tau: float = Field(1.0, gt=0)  # Gumbel-softmax temperature
+    tau: float = Field(2.0, gt=0)  # Gumbel-softmax temperature
     # empty means freshly initialized; afterwards it holds the live parameters
     weights: dict[str, Tensor] = Field(default_factory=dict)
 

@@ -6,7 +6,7 @@ import anndata as ad
 import numpy as np
 import scipy.sparse as sp
 import torch
-from pydantic import Field, model_validator
+from pydantic import model_validator
 
 from histem.dynamics import Intervention
 from histem.metrics import energy_distance, log_normalize
@@ -43,9 +43,6 @@ class CountsDataset(FrozenSpec):
     counts: dict[str, Tensor]  # condition -> (n_cells, n_features)
     interventions: dict[str, Intervention]
     modality: str = "rna"
-    # weight of the squared distance between real and simulated mean expression,
-    # summed over features, added to the energy distance in `loss`
-    mean_weight: float = Field(0.0, ge=0)
 
     @model_validator(mode="after")
     def _check(self) -> Self:
@@ -90,10 +87,7 @@ class CountsDataset(FrozenSpec):
         x = self.normalized(condition, n)[:, mine]
         y = self.simulated(system, condition, n)[:, theirs]
         x = x.to(y.device)
-        loss = energy_distance(x, y)
-        if self.mean_weight:
-            loss = loss + self.mean_weight * (x.mean(0) - y.mean(0)).pow(2).sum()
-        return loss
+        return energy_distance(x, y)
 
     def normalized(self, condition: str, n: int | None = None) -> torch.Tensor:
         """Log-normalized observed cells; a random n of them if there are more.

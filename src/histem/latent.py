@@ -15,7 +15,7 @@ def make_system(
     layers: int = 2,
     decoder_width: int = 128,
     gene_dim: int = 128,
-    tau: float = 1.0,
+    tau: float = 2.0,
     burn_in: int = 20,
     grad_steps: int | None = 10,
     device: str = "cpu",
