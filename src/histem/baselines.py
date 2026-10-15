@@ -7,9 +7,15 @@ from histem.data import CountsDataset
 from histem.metrics import energy_distance
 
 
-def control(ds: CountsDataset, condition: str, n: int) -> torch.Tensor:
-    """Predict that the perturbation does nothing."""
-    return energy_distance(ds.normalized("control", n), ds.normalized(condition, n))
+def control(
+    ds: CountsDataset, condition: str, n: int, columns: list[int] | None = None
+) -> torch.Tensor:
+    """Predict that the perturbation does nothing. `columns` restricts the score
+    to those features."""
+    pred, real = ds.normalized("control", n), ds.normalized(condition, n)
+    if columns is not None:
+        pred, real = pred[:, columns], real[:, columns]
+    return energy_distance(pred, real)
 
 
 def additive_shift(ds: CountsDataset, condition: str) -> torch.Tensor:
@@ -24,7 +30,12 @@ def additive_shift(ds: CountsDataset, condition: str) -> torch.Tensor:
     ).sum(dim=0)
 
 
-def additive(ds: CountsDataset, condition: str, n: int) -> torch.Tensor:
+def additive(
+    ds: CountsDataset, condition: str, n: int, columns: list[int] | None = None
+) -> torch.Tensor:
     """Control cells shifted by the sum of the singles' mean shifts."""
     pred = ds.normalized("control", n) + additive_shift(ds, condition)
-    return energy_distance(pred, ds.normalized(condition, n))
+    real = ds.normalized(condition, n)
+    if columns is not None:
+        pred, real = pred[:, columns], real[:, columns]
+    return energy_distance(pred, real)
