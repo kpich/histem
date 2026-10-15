@@ -1,15 +1,15 @@
 """A learned transition kernel: masked discrete diffusion over the next values of
 some discrete slots of a cell's state.
 
-Each state variable, each received signal and each perturbed gene is a token; a
-perturbed gene's token is its vector in the system's `GeneTable` plus a learned
-vector for the perturbation's kind, so combinations of perturbations are sets of
-tokens. A transformer over one cell's tokens passes messages between them;
-between cells, messages go through the simulator's signal routing. A step starts
-with every variable's next level masked and unmasks them in `rounds` random
-chunks, each conditioned on x, the received signals, the perturbed genes and the
-levels unmasked so far. Levels are drawn with straight-through Gumbel-softmax, so
-states stay on the grid and gradients still flow.
+Each state variable, each received signal, the context (e.g. the dataset) and each
+perturbed gene is a token; a perturbed gene's token is its vector in the system's
+`GeneTable` plus a learned vector for the perturbation's kind, so combinations of
+perturbations are sets of tokens. A transformer over one cell's tokens passes
+messages between them; between cells, messages go through the simulator's signal
+routing. A step starts with every variable's next level masked and unmasks them in
+`rounds` random chunks, each conditioned on x, the received signals, the perturbed
+genes and the levels unmasked so far. Levels are drawn with straight-through
+Gumbel-softmax, so states stay on the grid and gradients still flow.
 """
 
 import itertools
@@ -31,6 +31,7 @@ class _Net(nn.Module):
         self,
         n_vars: int,
         n_signals: int,
+        contexts: tuple[str, ...],
         gene_dim: int,
         levels: int,
         *,
@@ -41,6 +42,9 @@ class _Net(nn.Module):
         super().__init__()
         self.n_vars = n_vars
         self.token = nn.Parameter(0.02 * torch.randn(n_vars + n_signals, width))
+        self.context = nn.ParameterDict(
+            {c: nn.Parameter(0.02 * torch.randn(width)) for c in contexts}
+        )
         self.gene = nn.Linear(gene_dim, width)
         self.kind = nn.Parameter(0.02 * torch.randn(len(KINDS), width))
         self.value = nn.Linear(1, width)
@@ -58,23 +62,28 @@ class _Net(nn.Module):
             else None
         )
 
+    def extra(self, context: str, genes: torch.Tensor, kind: int) -> torch.Tensor:
+        """(1 + k, width) tokens for the context and the perturbed genes, given
+        their table vectors (k, gene_dim)."""
+        out: torch.Tensor = self.context[context].unsqueeze(0)
+        if len(genes):
+            out = torch.cat([out, self.gene(genes) + self.kind[kind]])
+        return out
+
     def forward(
         self,
         partial: torch.Tensor,
         x: torch.Tensor,
         received: torch.Tensor,
-        genes: torch.Tensor,
-        kind: int,
+        extra: torch.Tensor,
     ) -> torch.Tensor:
         """Logits (n, n_vars, levels) given the partial next state
-        (n, n_vars, levels + 1) and the perturbed genes' table vectors (k, gene_dim)."""
+        (n, n_vars, levels + 1) and the `extra` tokens."""
         values = torch.cat([x, received], dim=1).unsqueeze(-1)
         nxt = self.next(partial)
         pad = nxt.new_zeros(x.shape[0], received.shape[1], nxt.shape[-1])
         h = self.token + self.value(values) + torch.cat([nxt, pad], dim=1)
-        if len(genes):
-            g = self.gene(genes) + self.kind[kind]
-            h = torch.cat([h, g.expand(x.shape[0], -1, -1)], dim=1)
+        h = torch.cat([h, extra.expand(x.shape[0], -1, -1)], dim=1)
         out: torch.Tensor = self.logits(self.encoder(h)[:, : self.n_vars])
         return out
 
@@ -83,6 +92,7 @@ class DiffusionKernel(FrozenSpec):
     """A mechanism that reads and writes `slots`."""
 
     slots: tuple[Slot, ...] = Field(min_length=1)
+    contexts: tuple[str, ...] = Field(min_length=1)
     signals: tuple[str, ...] = ()
     gene_dim: int = Field(128, gt=0)  # the bound GeneTable's dim
     width: int = Field(64, gt=0)
@@ -106,6 +116,7 @@ class DiffusionKernel(FrozenSpec):
         self._net = _Net(
             len(per_var),
             len(self.signals),
+            self.contexts,
             self.gene_dim,
             max(per_var),
             width=self.width,
@@ -146,29 +157,31 @@ class DiffusionKernel(FrozenSpec):
         partial: torch.Tensor,
         x: torch.Tensor,
         received: torch.Tensor,
-        genes: torch.Tensor,
-        kind: int,
+        extra: torch.Tensor,
     ) -> torch.Tensor:
-        logits: torch.Tensor = self._net(partial, x, received, genes, kind)
+        logits: torch.Tensor = self._net(partial, x, received, extra)
         return logits.masked_fill(self._invalid.to(logits.device), float("-inf"))
 
     def step(self, pop: Population, inputs: Inputs) -> dict[str, torch.Tensor]:
         x = self._flat(pop)
         n, v = x.shape
         iv = inputs.intervention
+        if inputs.context not in self.contexts:
+            raise KeyError(f"unknown context {inputs.context!r}")
         genes, kind = x.new_zeros(0, self.gene_dim), 0
         if iv.genes:
             if self._genes is None:
                 raise RuntimeError("no gene table bound")
             assert iv.kind is not None
             genes, kind = self._genes.embed(iv.genes), KINDS.index(iv.kind)
+        extra = self._net.extra(inputs.context, genes, kind)
         partial = x.new_zeros(n, v, self.levels + 1)
         partial[..., -1] = 1.0
         order = torch.rand(n, v, device=x.device).argsort(dim=1).argsort(dim=1)
         bounds = torch.linspace(0, v, self.rounds + 1).round().long().tolist()
         for lo, hi in itertools.pairwise(bounds):
             reveal = ((order >= lo) & (order < hi)).unsqueeze(-1)
-            logits = self._logits(partial, x, inputs.signals, genes, kind)
+            logits = self._logits(partial, x, inputs.signals, extra)
             drawn = nn.functional.gumbel_softmax(logits, tau=self.tau, hard=True)
             drawn = torch.cat([drawn, drawn.new_zeros(n, v, 1)], dim=-1)
             partial = torch.where(reveal, drawn, partial)

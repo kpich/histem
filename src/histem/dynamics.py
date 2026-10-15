@@ -33,6 +33,7 @@ CONTROL = Intervention()
 class Inputs:
     signals: torch.Tensor  # (n, n_signals) received
     intervention: Intervention = field(default=CONTROL)
+    context: str | None = None  # e.g. the dataset's cell type and assay
 
 
 @runtime_checkable

@@ -30,6 +30,10 @@ class GeneTable(FrozenSpec):
     def named_parameters(self) -> Iterator[tuple[str, torch.Tensor]]:
         return iter(self.weights.items())
 
+    def gene_rows(self) -> dict[str, tuple[str, ...]]:
+        """Parameters whose rows are genes, and which genes."""
+        return {"table": self.genes}
+
     def index(self, genes: tuple[str, ...], device: torch.device) -> torch.Tensor:
         where = {g: i for i, g in enumerate(self.genes)}
         if unknown := sorted(set(genes) - where.keys()):

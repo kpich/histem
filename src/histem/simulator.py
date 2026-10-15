@@ -54,11 +54,12 @@ def simulate(
     pop: Population,
     steps: int,
     *,
+    context: str | None = None,
     intervention: Intervention = CONTROL,
     signaling: Signaling | None = None,
 ) -> Population:
     signaling = signaling or Signaling()
     for _ in range(steps):
         received = signaling.route(dynamics.emit_signals(pop))
-        pop = dynamics.step(pop, Inputs(received, intervention))
+        pop = dynamics.step(pop, Inputs(received, intervention, context))
     return pop

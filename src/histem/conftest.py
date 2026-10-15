@@ -20,6 +20,7 @@ def ds() -> CountsDataset:
     }
     return CountsDataset(
         name="tiny",
+        context="tiny",
         features=("A", "B", "g1", "g2"),
         counts={c: torch.poisson(base * torch.tensor(s)) for c, s in scale.items()},
         interventions={
@@ -35,5 +36,5 @@ def ds() -> CountsDataset:
 def system(ds: CountsDataset) -> CellSystem:
     torch.manual_seed(0)
     return make_system(
-        ds, latents=3, levels=3, width=16, layers=1, burn_in=3, grad_steps=2
+        [ds], latents=3, levels=3, width=16, layers=1, steps=3, grad_steps=2
     )

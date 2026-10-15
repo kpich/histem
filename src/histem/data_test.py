@@ -50,6 +50,7 @@ def test_counts_must_match_features() -> None:
     with pytest.raises(ValidationError, match="features"):
         CountsDataset(
             name="d",
+            context="d",
             features=("g1",),
             counts={"control": torch.zeros((2, 3))},
             interventions=IVS,
@@ -59,6 +60,7 @@ def test_counts_must_match_features() -> None:
 def test_split_by_condition() -> None:
     ds = CountsDataset(
         name="d",
+        context="d",
         features=("g1",),
         counts={"control": torch.zeros((2, 1)), "ko": torch.zeros((3, 1))},
         interventions=IVS,
