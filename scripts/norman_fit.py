@@ -5,13 +5,14 @@ perturbations against the control and additive baselines. Logs to TensorBoard
 import argparse
 import json
 import time
+from pathlib import Path
 
 import torch
 
 from histem import baselines, latent, norman, plots
 from histem.data import CountsDataset, combo_split
 from histem.learners.gradient import gradient_fit
-from histem.metrics import energy_distance
+from histem.metrics import energy_distance, probe_accuracy
 from histem.rng import seeded
 from histem.runlog import RunLog
 from histem.suite import Suite
@@ -27,6 +28,9 @@ def _args() -> argparse.Namespace:
     ap.add_argument("--conditions", type=int, default=4)
     ap.add_argument("--eval-every", type=int, default=100)
     ap.add_argument("--eval-cells", type=int, default=300)
+    ap.add_argument("--shift-cells", type=int, default=500)
+    ap.add_argument("--probe-cells", type=int, default=100)
+    ap.add_argument("--de-genes", type=int, default=20)
     ap.add_argument("--train-eval", type=int, default=16)
     ap.add_argument("--plot-conditions", type=int, default=4)
     ap.add_argument("--genes", type=int, default=1000)
@@ -42,13 +46,16 @@ def _args() -> argparse.Namespace:
     ap.add_argument("--grad-steps", type=int, default=10)
     ap.add_argument("--device", default="mps")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--load", type=Path, help="start from a saved system")
     return ap.parse_args()
 
 
 class Evaluator:
-    """Energy distance, mean-shift correlation and the shift of the perturbed genes
-    themselves, on watched train conditions and held-out doubles, logged with the
-    baselines' at every call."""
+    """Energy distance (over all genes and over each condition's top DE genes),
+    mean-shift correlation and the shift of the perturbed genes themselves, on
+    watched train conditions and held-out doubles, logged with the baselines' at
+    every call. Also how well a linear probe tells the singles apart from simulated
+    cells, against the same probe on real cells."""
 
     def __init__(
         self,
@@ -60,8 +67,17 @@ class Evaluator:
     ):
         self.ds, self.watched, self.held_out, self.log = ds, watched, held_out, log
         self.n = args.eval_cells
+        self.n_shift = max(args.shift_cells, args.eval_cells)
+        self.n_probe = args.probe_cells
+        self.singles = sorted(ds.singles().values())
         self.seed = args.seed
         self.n_plots = args.plot_conditions
+        self.perturbed = watched[1:] + held_out
+        self.real_shift = {c: _shift(ds, c) for c in self.perturbed}
+        self.de = {
+            c: self.real_shift[c].abs().topk(args.de_genes).indices.tolist()
+            for c in self.perturbed
+        }
         with torch.no_grad(), seeded(self.seed):
             self.control_ed = {
                 c: float(baselines.control(ds, c, self.n)) for c in watched + held_out
@@ -69,18 +85,32 @@ class Evaluator:
             self.additive_ed = {
                 c: float(baselines.additive(ds, c, self.n)) for c in held_out
             }
-        self.perturbed = watched[1:] + held_out
-        self.real_shift = {c: _shift(ds, c) for c in self.perturbed}
+            self.control_de = {
+                c: float(baselines.control(ds, c, self.n, self.de[c]))
+                for c in self.perturbed
+            }
+            self.additive_de = {
+                c: float(baselines.additive(ds, c, self.n, self.de[c]))
+                for c in held_out
+            }
+            real = {c: ds.normalized(c, self.n_probe) for c in self.singles}
+            self.real_probe = probe_accuracy(real)
         self.additive_shift = {c: baselines.additive_shift(ds, c) for c in held_out}
 
     def __call__(self, system: CellSystem, step: int) -> None:
         ds, n, held = self.ds, self.n, self.held_out
-        ed, sims, reals = {}, {}, {}
+        ed, de, sims, reals = {}, {}, {}, {}
         with torch.no_grad(), seeded(self.seed):
             for c in self.watched + held:
-                sims[c] = ds.simulated(system, c, n).cpu()
+                sims[c] = ds.simulated(system, c, self.n_shift).cpu()
                 reals[c] = ds.normalized(c, n)
-                ed[c] = float(energy_distance(reals[c], sims[c]))
+                ed[c] = float(energy_distance(reals[c], sims[c][:n]))
+                if c in self.de:
+                    cols = self.de[c]
+                    de[c] = float(energy_distance(reals[c][:, cols], sims[c][:n, cols]))
+            probe = probe_accuracy(
+                {c: ds.simulated(system, c, self.n_probe).cpu() for c in self.singles}
+            )
         control_mean = sims["control"].mean(dim=0)
         model_shift = {c: sims[c].mean(dim=0) - control_mean for c in self.perturbed}
         train = self.watched[1:]
@@ -104,6 +134,23 @@ class Evaluator:
                 "control": _mean(self.control_ed, self.watched),
             },
             step,
+        )
+        self.log.scalars(
+            "energy_de/held_out",
+            {
+                "model": _mean(de, held),
+                "control": _mean(self.control_de, held),
+                "additive": _mean(self.additive_de, held),
+            },
+            step,
+        )
+        self.log.scalars(
+            "energy_de/train",
+            {"model": _mean(de, train), "control": _mean(self.control_de, train)},
+            step,
+        )
+        self.log.scalars(
+            "probe/singles", {"model": probe, "real": self.real_probe}, step
         )
         self.log.scalars(
             "shift_r/held_out",
@@ -141,7 +188,7 @@ class Evaluator:
                 f"shift/{c}", plots.shift_scatter(shifts, self.real_shift[c], c), step
             )
             with seeded(self.seed):
-                pca = plots.pca_overlay(reals[c], sims[c], reals["control"], c)
+                pca = plots.pca_overlay(reals[c], sims[c][:n], reals["control"], c)
             self.log.figure(f"pca/{c}", pca, step)
         self.log.flush()
         system.save(self.log.dir / "system")
@@ -149,7 +196,8 @@ class Evaluator:
             f"[{step}] held-out model={_mean(ed, held):.3f} "
             f"additive={_mean(self.additive_ed, held):.3f} "
             f"control={_mean(self.control_ed, held):.3f}  "
-            f"train model={_mean(ed, self.watched):.3f}"
+            f"train model={_mean(ed, self.watched):.3f}  "
+            f"probe model={probe:.3f} real={self.real_probe:.3f}"
         )
 
 
@@ -169,20 +217,23 @@ def main() -> None:
     picked = torch.randperm(len(others), generator=g)[: args.train_eval].tolist()
     watched = ["control", *sorted(others[i] for i in picked)]
 
-    system = latent.make_system(
-        ds,
-        latents=args.latents,
-        levels=args.levels,
-        width=args.width,
-        layers=args.layers,
-        gene_dim=args.gene_dim,
-        tau=args.tau,
-        burn_in=args.burn_in,
-        grad_steps=args.grad_steps,
-        device=args.device,
-    )
+    if args.load:
+        system = CellSystem.load(args.load).to(args.device)
+    else:
+        system = latent.make_system(
+            ds,
+            latents=args.latents,
+            levels=args.levels,
+            width=args.width,
+            layers=args.layers,
+            gene_dim=args.gene_dim,
+            tau=args.tau,
+            burn_in=args.burn_in,
+            grad_steps=args.grad_steps,
+            device=args.device,
+        )
     log = RunLog(args.name)
-    log.text("config", f"```\n{json.dumps(vars(args), indent=2)}\n```")
+    log.text("config", f"```\n{json.dumps(vars(args), indent=2, default=str)}\n```")
     log.text("held_out", ", ".join(held_out))
     print(f"logging to {log.dir}")
     print(f"{len(train.conditions)} train conditions, {len(held_out)} held out")
