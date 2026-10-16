@@ -124,13 +124,9 @@ def from_anndata(
     """The `n_genes` most variable genes in log-normalized expression, plus every
     measured target gene; at most `max_cells` cells per condition. `intervention`
     parses a condition label."""
-    x = sp.csc_matrix(adata.X)
+    x = sp.csr_matrix(adata.X)
     labels = adata.obs[condition_key].astype(str).to_numpy()
-    totals = np.asarray(x.sum(axis=1)).ravel()
-    norm = sp.csc_matrix(x.multiply(1e4 / np.maximum(totals, 1)[:, None]))
-    norm.data = np.log1p(norm.data)
-    mean = np.asarray(norm.mean(axis=0)).ravel()
-    var = np.asarray(norm.multiply(norm).mean(axis=0)).ravel() - mean**2
+    var = _log_norm_var(x)
     names = list(adata.var_names)
     cols = sorted(np.argsort(-var)[:n_genes].tolist())
     interventions = {c: intervention(c) for c in sorted(set(labels))}
@@ -138,7 +134,7 @@ def from_anndata(
     where = {g: i for i, g in enumerate(names)}
     cols += sorted(where[g] for g in targets if g in where and where[g] not in cols)
 
-    sub = sp.csr_matrix(x[:, cols])
+    sub = x[:, cols]
     rng = np.random.default_rng(seed)
     counts = {}
     for c in interventions:
@@ -153,6 +149,22 @@ def from_anndata(
         counts=counts,
         interventions=interventions,
     )
+
+
+def _log_norm_var(x: sp.csr_matrix, chunk: int = 20_000) -> np.ndarray:
+    """Per-gene variance of log CP10k, a block of rows at a time."""
+    total = np.zeros(x.shape[1])
+    square = np.zeros(x.shape[1])
+    for start in range(0, x.shape[0], chunk):
+        block = x[start : start + chunk]
+        lib = np.maximum(np.asarray(block.sum(axis=1)).ravel(), 1)
+        norm = sp.csr_matrix(block.multiply(1e4 / lib[:, None]))
+        norm.data = np.log1p(norm.data)
+        total += np.asarray(norm.sum(axis=0)).ravel()
+        square += np.asarray(norm.multiply(norm).sum(axis=0)).ravel()
+    mean = total / x.shape[0]
+    var: np.ndarray = square / x.shape[0] - mean**2
+    return var
 
 
 def cached(key: str, build: Callable[[], CountsDataset]) -> CountsDataset:
