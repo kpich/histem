@@ -1,4 +1,4 @@
-.PHONY: install install-precommit-hooks check lint format typecheck test int-test norman tb tb-all
+.PHONY: install install-precommit-hooks check lint format typecheck test int-test norman replogle tb tb-all
 
 install:
 	uv sync
@@ -26,7 +26,10 @@ int-test:
 	uv run pytest tests
 
 norman:
-	uv run scripts/norman_fit.py
+	uv run scripts/fit.py --dataset norman
+
+replogle:
+	uv run scripts/fit.py --dataset replogle
 
 N ?= 1
 tb:  # the N most recent runs

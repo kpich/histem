@@ -14,10 +14,10 @@ from histem.state import Population, Slot
 class _Net(nn.Module):
     def __init__(self, gene_dim: int, rank: int):
         super().__init__()
-        self.source = nn.Linear(gene_dim, rank)
-        self.sink = nn.Linear(gene_dim, rank)
+        # no biases, so a gene with a zero table vector neither drives nor is driven
+        self.source = nn.Linear(gene_dim, rank, bias=False)
+        self.sink = nn.Linear(gene_dim, rank, bias=False)
         nn.init.zeros_(self.sink.weight)
-        nn.init.zeros_(self.sink.bias)
         self.rate = nn.Parameter(torch.zeros(()))  # sigmoid 0.5
 
     def forward(self, a: torch.Tensor, table: torch.Tensor, cap: float) -> torch.Tensor:

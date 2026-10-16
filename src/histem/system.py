@@ -124,8 +124,9 @@ class CellSystem(FrozenSpec):
     def load_weights(self, src: "CellSystem") -> list[str]:
         """Copy `src`'s parameters into this system by name, so parts can be
         swapped or added. Parameters with gene rows copy the genes both have, so a
-        gene table can grow. Returns the names of parameters `src` doesn't have,
-        which keep their initial values."""
+        gene table can grow; genes `src` lacks get zero table vectors, which leave
+        the parts trained without them unchanged. Returns the names of parameters
+        `src` doesn't have, which keep their initial values."""
         theirs = dict(src.named_parameters())
         their_rows, our_rows = src._gene_rows(), self._gene_rows()
         fresh = []
@@ -151,6 +152,11 @@ class CellSystem(FrozenSpec):
                     )
                 else:
                     p.copy_(q)
+            if self.genes is not None and src.genes is not None:
+                table = self.genes.weights["table"]
+                known = set(src.genes.genes)
+                new = [i for i, g in enumerate(self.genes.genes) if g not in known]
+                table[new] = 0
         return fresh
 
     def to(self, device: str) -> "CellSystem":

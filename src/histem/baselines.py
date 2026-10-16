@@ -30,11 +30,31 @@ def additive_shift(ds: CountsDataset, condition: str) -> torch.Tensor:
     ).sum(dim=0)
 
 
+def mean_shift(ds: CountsDataset, conditions: list[str]) -> torch.Tensor:
+    """Average of the conditions' mean shifts from control: the same prediction for
+    every unseen perturbation."""
+    base = ds.normalized("control").mean(dim=0)
+    return torch.stack([ds.normalized(c).mean(dim=0) - base for c in conditions]).mean(
+        dim=0
+    )
+
+
 def additive(
     ds: CountsDataset, condition: str, n: int, columns: list[int] | None = None
 ) -> torch.Tensor:
     """Control cells shifted by the sum of the singles' mean shifts."""
-    pred = ds.normalized("control", n) + additive_shift(ds, condition)
+    return shifted(ds, condition, n, additive_shift(ds, condition), columns)
+
+
+def shifted(
+    ds: CountsDataset,
+    condition: str,
+    n: int,
+    shift: torch.Tensor,
+    columns: list[int] | None = None,
+) -> torch.Tensor:
+    """Control cells moved by `shift`."""
+    pred = ds.normalized("control", n) + shift
     real = ds.normalized(condition, n)
     if columns is not None:
         pred, real = pred[:, columns], real[:, columns]
