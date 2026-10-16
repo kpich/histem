@@ -67,6 +67,7 @@ def test_load_weights_into_a_system_with_more_genes_and_contexts(
     assert bigger.genes is not None
     old, new = system.genes, bigger.genes
     assert torch.equal(new.embed(old.genes), old.embed(old.genes))
+    assert not new.embed(("new",)).any()
     means = []
     for s in (system, bigger):
         obs = s.observers["rna"]

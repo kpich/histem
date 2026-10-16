@@ -5,8 +5,9 @@ import pytest
 import torch
 from pydantic import ValidationError
 
-from histem.data import CountsDataset, Dataset, combo_split, from_anndata
+from histem.data import CountsDataset, Dataset, combo_split, from_anndata, single_split
 from histem.dynamics import CONTROL, Intervention
+from histem.latent import make_system
 from histem.system import CellSystem
 
 IVS = {"control": CONTROL, "ko": Intervention(name="ko")}
@@ -46,6 +47,11 @@ def test_combo_split_only_holds_out_composable_doubles() -> None:
     assert combo_split(_built(), frac=1.0) == ["A_B"]
 
 
+def test_single_split_only_holds_out_singles() -> None:
+    assert single_split(_built(), frac=1.0) == ["A", "B"]
+    assert single_split(_built(), frac=0.5, seed=1) in (["A"], ["B"])
+
+
 def test_counts_must_match_features() -> None:
     with pytest.raises(ValidationError, match="features"):
         CountsDataset(
@@ -79,3 +85,19 @@ def test_loss_is_finite_scalar_on_a_batch(
     loss = ds.loss(system, "control", 8)
     assert loss.ndim == 0
     assert torch.isfinite(loss)
+
+
+def test_simulated_cells_cover_only_the_datasets_features(ds: CountsDataset) -> None:
+    other = ds.model_copy(
+        update={
+            "name": "other",
+            "context": "other",
+            "features": ("g3", "g1"),
+            "counts": {c: x[:, :2] for c, x in ds.counts.items()},
+        }
+    )
+    system = make_system([ds, other], latents=2, levels=2, width=8, layers=1, steps=1)
+    with torch.no_grad():
+        sim = other.simulated(system, "A", 5)
+    assert sim.shape == (5, 2)
+    assert torch.allclose(sim.expm1().sum(dim=1), torch.full((5,), 1e4), rtol=1e-3)

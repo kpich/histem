@@ -84,10 +84,9 @@ class CountsDataset(FrozenSpec):
         }
 
     def loss(self, system: CellSystem, condition: str, n: int) -> torch.Tensor:
-        observer = system.observers[self.modality]
-        mine, theirs = _shared(self.features, observer.features)
+        mine, _ = _shared(self.features, system.observers[self.modality].features)
         x = self.normalized(condition, n)[:, mine]
-        y = self.simulated(system, condition, n)[:, theirs]
+        y = self.simulated(system, condition, n)
         x = x.to(y.device)
         return energy_distance(x, y)
 
@@ -100,14 +99,17 @@ class CountsDataset(FrozenSpec):
         return log_normalize(obs, obs.sum(dim=1))
 
     def simulated(self, system: CellSystem, condition: str, n: int) -> torch.Tensor:
-        """n log-normalized simulated cells, over the observer's features."""
+        """n log-normalized simulated cells over the features the observer shares
+        with this dataset, in this dataset's order. Library sizes are row sums over
+        those features, as for observed cells."""
+        _, theirs = _shared(self.features, system.observers[self.modality].features)
         sim = system.sample(
             n,
             self.context,
             self.interventions[condition],
             self.modality,
             reparam=torch.is_grad_enabled(),
-        )
+        )[:, theirs]
         return log_normalize(sim, sim.sum(dim=1))
 
 
@@ -188,6 +190,14 @@ def combo_split(ds: CountsDataset, frac: float = 0.2, seed: int = 0) -> list[str
     g = torch.Generator().manual_seed(seed)
     idx = torch.randperm(len(combos), generator=g)[: round(frac * len(combos))]
     return sorted(combos[i] for i in idx.tolist())
+
+
+def single_split(ds: CountsDataset, frac: float = 0.1, seed: int = 0) -> list[str]:
+    """A random `frac` of the single perturbations."""
+    singles = sorted(ds.singles().values())
+    g = torch.Generator().manual_seed(seed)
+    idx = torch.randperm(len(singles), generator=g)[: round(frac * len(singles))]
+    return sorted(singles[i] for i in idx.tolist())
 
 
 def _shared(

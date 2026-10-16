@@ -12,6 +12,7 @@ SCHEMA = StateSchema(slots=(SLOT,))
 
 
 def _system() -> tuple[Composite, Regulate]:
+    torch.manual_seed(0)
     table = GeneTable(genes=SLOT.variables, dim=4)
     regulate = Regulate(slot=SLOT, gene_dim=4, rank=2)
     perturb = Perturb(slot=SLOT, gene_dim=4)
@@ -30,7 +31,7 @@ def _run(c: Composite, iv: Intervention, steps: int = 3) -> torch.Tensor:
 def test_control_stays_at_zero() -> None:
     c, regulate = _system()
     with torch.no_grad():
-        regulate.weights["sink.bias"].fill_(1.0)
+        regulate.weights["sink.weight"].normal_()
     assert _run(c, CONTROL).eq(0.0).all()
 
 
@@ -39,7 +40,7 @@ def test_perturbation_spreads_to_other_genes_and_targets_stay_held() -> None:
     iv = Intervention(name="A", genes=("A",), kind="activate")
     assert _run(c, iv)[:, 1:].eq(0.0).all()  # sink starts at zero
     with torch.no_grad():
-        regulate.weights["sink.bias"].fill_(1.0)
+        regulate.weights["sink.weight"].normal_()
     out = _run(c, iv)
     assert out[:, 0].eq(2.0).all()
     assert out[:, 1:].ne(0.0).all()
@@ -49,9 +50,20 @@ def test_perturbation_spreads_to_other_genes_and_targets_stay_held() -> None:
 def test_coupling_is_learned() -> None:
     c, regulate = _system()
     with torch.no_grad():
-        regulate.weights["sink.bias"].fill_(1.0)
+        regulate.weights["sink.weight"].normal_()
     _run(c, Intervention(name="A", genes=("A",), kind="activate")).sum().backward()
     for name in ("source.weight", "sink.weight", "rate"):
         grad = regulate.weights[name].grad
         assert grad is not None
         assert grad.abs().sum() > 0
+
+
+def test_a_gene_with_a_zero_vector_is_inert() -> None:
+    c, regulate = _system()
+    with torch.no_grad():
+        regulate.weights["sink.weight"].normal_()
+        assert regulate._genes is not None
+        regulate._genes.weights["table"][2] = 0
+    out = _run(c, Intervention(name="A", genes=("A",), kind="activate"))
+    assert out[:, 1].ne(0.0).all()
+    assert out[:, 2].eq(0.0).all()

@@ -15,6 +15,13 @@ def test_additive_shift_of_a_single_is_its_own_shift(ds: CountsDataset) -> None:
     assert (baselines.additive_shift(ds, "A") - expected).abs().max() < 1e-6
 
 
+def test_mean_shift_averages_the_conditions(ds: CountsDataset) -> None:
+    both = baselines.mean_shift(ds, ["A", "B"])
+    halves = baselines.additive_shift(ds, "A_B") / 2
+    assert (both - halves).abs().max() < 1e-6
+    assert baselines.shifted(ds, "A", 20, both) < baselines.control(ds, "A", 20)
+
+
 def test_additive_needs_the_singles(ds: CountsDataset) -> None:
     _, only_double = ds.split(["control", "A_B"])
     with pytest.raises(KeyError, match="no single"):
