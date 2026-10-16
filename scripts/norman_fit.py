@@ -11,7 +11,7 @@ import torch
 
 from histem import baselines, latent, norman, plots
 from histem.data import CountsDataset, combo_split
-from histem.learners.gradient import gradient_fit
+from histem.learners.gradient import gradient_fit, param_group
 from histem.metrics import energy_distance, probe_accuracy
 from histem.rng import seeded
 from histem.runlog import RunLog
@@ -255,7 +255,14 @@ def main() -> None:
 
     evaluate(system, 0)
     start = last = time.perf_counter()
-    gradient_fit(system, fit_suite, args.steps, lr=args.lr, callback=on_step)
+    gradient_fit(
+        system,
+        fit_suite,
+        args.steps,
+        lr=args.lr,
+        group=param_group,
+        callback=on_step,
+    )
     print(f"fit in {time.perf_counter() - start:.0f}s")
     log.close()
 
@@ -270,12 +277,7 @@ def _group_norms(norms: dict[str, float]) -> dict[str, float]:
     for name, v in norms.items():
         if name == "total":
             continue
-        if name.endswith("log_dispersion"):
-            group = "dispersion"
-        elif name.startswith("dynamics/"):
-            group = name.split("/")[1]  # the mechanism
-        else:
-            group = {"observers": "decoder"}.get(name.split("/")[0], name.split("/")[0])
+        group = param_group(name)
         squares[group] = squares.get(group, 0.0) + v**2
     return {k: v**0.5 for k, v in squares.items()}
 
